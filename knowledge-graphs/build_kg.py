@@ -37,7 +37,8 @@ df_rules = pd.DataFrame(guideline_rules)
 load_dotenv() # This loads the variables from the .env file
 
 UMLS_API_KEY = os.getenv("UMLS_API_KEY")
-INFOWAY_TOKEN = os.getenv("INFOWAY_TOKEN")
+INFOWAY_CLIENT_ID = os.getenv("INFOWAY_CLIENT_ID")
+INFOWAY_CLIENT_SECRET = os.getenv("INFOWAY_CLIENT_SECRET")
 
 # --- 3. The API Functions (Kept exactly as you wrote them) ---
 def get_snomed_concept(term, api_key):
@@ -67,6 +68,35 @@ def get_snomed_concept(term, api_key):
         print(f"API Error for term '{term}': {e}")
         return term, None
 
+def get_infoway_access_token(client_id, client_secret):
+    """
+    Exchanges a Client ID and Client Secret for an OAuth2 Access Token
+    from Canada Health Infoway's authorization server.
+    """
+    auth_url = "https://terminologystandardsservice.ca/authorisation/auth/realms/terminology/protocol/openid-connect/token"
+    
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret
+    }
+    
+    # The payload must be sent as form data (application/x-www-form-urlencoded)
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    
+    try:
+        response = requests.post(auth_url, data=payload, headers=headers)
+        response.raise_for_status() # Will raise an exception for 4xx/5xx errors
+        token_data = response.json()
+        
+        return token_data.get("access_token")
+        
+    except Exception as e:
+        print(f"Failed to obtain access token: {e}")
+        return None
+
 def get_infoway_snomed_concept(term, access_token):
     """
     Queries Canada Health Infoway's FHIR API to find a SNOMED CT CA concept.
@@ -81,7 +111,7 @@ def get_infoway_snomed_concept(term, access_token):
     
     # Standard FHIR search parameters filtering for the SNOMED CT CA CodeSystem
     params = {
-        "url": "http://snomed.info/sct", # Target SNOMED
+        "url": "http://snomed.info/sct?fhir_vs", # Target SNOMED
         "filter": term,
         "count": 1
     }
@@ -137,10 +167,10 @@ def get_open_medical_concept(term):
 # --- 4. The Unified Extraction Pipeline ---
 print("Extracting cross-mapped ontology codes...")
 
-# 1. Get US SNOMED (UMLS)
-df_rules[['umls_name', 'umls_code']] = df_rules.apply(
-    lambda row: pd.Series(get_snomed_concept(row['raw_symptom'], UMLS_API_KEY)), axis=1
-)
+# 1. Get US SNOMED (UMLS) # Currently no API Access Token
+# df_rules[['umls_name', 'umls_code']] = df_rules.apply(
+#     lambda row: pd.Series(get_snomed_concept(row['raw_symptom'], UMLS_API_KEY)), axis=1
+# )
 
 # 2. Get Open Ontologies (EMBL-EBI)
 df_rules[['ebi_name', 'ebi_code']] = df_rules.apply(
@@ -148,9 +178,15 @@ df_rules[['ebi_name', 'ebi_code']] = df_rules.apply(
 )
 
 # 3. Get Canadian SNOMED (Infoway)
-df_rules[['infoway_name', 'infoway_code']] = df_rules.apply(
-    lambda row: pd.Series(get_infoway_snomed_concept(row['raw_symptom'], INFOWAY_TOKEN)), axis=1
-)
+
+# 3.2. Fetch the fresh token
+print("Fetching access token...")
+INFOWAY_TOKEN = get_infoway_access_token(INFOWAY_CLIENT_ID, INFOWAY_CLIENT_SECRET)
+
+if INFOWAY_TOKEN:
+    df_rules[['infoway_name', 'infoway_code']] = df_rules.apply(
+        lambda row: pd.Series(get_infoway_snomed_concept(row['raw_symptom'], INFOWAY_TOKEN)), axis=1
+    )
 
 # --- 5. Building the Multi-Ontology Knowledge Graph (Refined Schema) ---
 def build_unified_medical_kg(df):
@@ -177,7 +213,7 @@ def build_unified_medical_kg(df):
         # 2. Add the primary node with ALL extracted codes as metadata
         G.add_node(primary_node, 
                    type=node_type, 
-                   snomed_us_code=row['umls_code'],
+                #    snomed_us_code=row['umls_code'],
                    snomed_ca_code=row['infoway_code'],
                    ebi_open_code=row['ebi_code'])
                    
