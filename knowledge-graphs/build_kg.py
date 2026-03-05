@@ -159,7 +159,11 @@ def get_infoway_snomed_concept(term, access_token):
 
 
 def get_open_medical_concept(term):
-    """Query EMBL-EBI OLS4 API for an open ontology concept (HP/MONDO/EFO). No key required."""
+    """Query EMBL-EBI OLS4 API for an open ontology concept (HP/MONDO/EFO). No key required.
+
+    Returns (label, short_form, synonyms) where synonyms is a (possibly empty) list
+    of alternative clinical terms for the concept.
+    """
     base_uri = "https://www.ebi.ac.uk/ols4/api/search"
     params = {
         "q": term,
@@ -174,11 +178,12 @@ def get_open_medical_concept(term):
         docs = response.json().get("response", {}).get("docs", [])
         if docs:
             best = docs[0]
-            return best.get("label"), best.get("short_form")
-        return term, None
+            synonyms = best.get("synonym") or []
+            return best.get("label"), best.get("short_form"), synonyms
+        return term, None, []
     except Exception as e:
         print(f"  EBI OLS API error for '{term}': {e}")
-        return term, None
+        return term, None, []
 
 
 def get_umls_concept(term, sabs, api_key):
@@ -250,6 +255,74 @@ def get_openfda_adverse_event(term):
         return None
 
 
+# Caches for the two evidence-weight APIs — keyed by normalised term tuples
+# so repeated calls with identical arguments are served from memory.
+_lit_cache:   dict = {}
+_trial_cache: dict = {}
+
+def get_literature_cooccurrence(term1, term2):
+    """Query Europe PMC for the number of articles mentioning both term1 and term2.
+
+    Uses the Europe PMC REST search API (no key required).
+    Returns the hitCount integer, or 0 on failure / no results.
+    """
+    key = (term1.lower(), term2.lower())
+    if key in _lit_cache:
+        return _lit_cache[key]
+
+    # FIX: Use parentheses for boolean grouping instead of strict exact-phrase quotes
+    # FIX: Change pageSize to 1 (Europe PMC rejects pageSize=0)
+    params = {
+        "query":  f'({term1}) AND ({term2})',
+        "format": "json",
+        "pageSize": 1,   
+    }
+    try:
+        response = requests.get(
+            "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+            params=params,
+        )
+        response.raise_for_status()
+        hit_count = response.json().get("hitCount", 0)
+    except Exception as e:
+        print(f"  Europe PMC error for ('{term1}', '{term2}'): {e}")
+        hit_count = 0
+
+    _lit_cache[key] = hit_count
+    return hit_count
+
+
+def get_clinical_trials_count(condition, treatment):
+    """Query ClinicalTrials.gov (v2 API) for the number of studies matching
+    a condition and an intervention/treatment.
+
+    No API key required.
+    Returns the totalCount integer, or 0 on failure / no results.
+    """
+    key = (condition.lower(), treatment.lower())
+    if key in _trial_cache:
+        return _trial_cache[key]
+
+    params = {
+        "query.cond": condition,
+        "query.intr": treatment,
+        "countTotal": "true",   # REQUIRED by ClinicalTrials API to return totalCount
+        "pageSize":   1,        # minimise payload — we only need totalCount
+    }
+    try:
+        response = requests.get(
+            "https://clinicaltrials.gov/api/v2/studies",
+            params=params,
+        )
+        response.raise_for_status()
+        total_count = response.json().get("totalCount", 0)
+    except Exception as e:
+        print(f"  ClinicalTrials.gov error for ('{condition}', '{treatment}'): {e}")
+        total_count = 0
+
+    _trial_cache[key] = total_count
+    return total_count
+
 # --- 4. Ontology Extraction Pipeline ---
 
 print("Extracting cross-mapped ontology codes...")
@@ -259,8 +332,8 @@ print("Extracting cross-mapped ontology codes...")
 #     lambda row: pd.Series(get_snomed_concept(row['raw_symptom'], UMLS_API_KEY)), axis=1
 # )
 
-# 2. Open ontology codes via EMBL-EBI OLS (no key required)
-df_rules[['ebi_name', 'ebi_code']] = df_rules.apply(
+# 2. Open ontology codes + synonyms via EMBL-EBI OLS (no key required)
+df_rules[['ebi_name', 'ebi_code', 'synonyms']] = df_rules.apply(
     lambda row: pd.Series(get_open_medical_concept(row['raw_symptom'])), axis=1
 )
 
@@ -313,6 +386,39 @@ if "treatment" in df_rules.columns:
         df_rules["rxcui"]         = df_rules["treatment"].map(rxcui_map)
         df_rules["adverse_event"] = df_rules["treatment"].map(adverse_event_map)
 
+# 7. Europe PMC literature co-occurrence weights (symptom ↔ condition)
+#    Deduplicate to unique (raw_symptom, condition) pairs before hitting the API.
+print("Fetching Europe PMC literature co-occurrence weights...")
+unique_sc_pairs = df_rules[["raw_symptom", "condition"]].drop_duplicates()
+lit_weight_map = {}
+for _, pair in unique_sc_pairs.iterrows():
+    lit_weight_map[(pair["raw_symptom"], pair["condition"])] = \
+        get_literature_cooccurrence(pair["raw_symptom"], pair["condition"])
+df_rules["literature_weight"] = df_rules.apply(
+    lambda row: lit_weight_map.get((row["raw_symptom"], row["condition"]), 0), axis=1
+)
+
+# 8. ClinicalTrials.gov trial counts (condition ↔ treatment)
+#    Only rows with a treatment value are queried; others receive None.
+if "treatment" in df_rules.columns:
+    unique_ct_pairs = (
+        df_rules[df_rules["treatment"].notna()][["condition", "treatment"]]
+        .drop_duplicates()
+    )
+    if not unique_ct_pairs.empty:
+        print("Fetching ClinicalTrials.gov trial counts...")
+        trial_count_map = {}
+        for _, pair in unique_ct_pairs.iterrows():
+            trial_count_map[(pair["condition"], pair["treatment"])] = \
+                get_clinical_trials_count(pair["condition"], pair["treatment"])
+        df_rules["trial_count"] = df_rules.apply(
+            lambda row: (
+                trial_count_map.get((row["condition"], row["treatment"]))
+                if pd.notna(row.get("treatment")) else None
+            ),
+            axis=1,
+        )
+
 
 # --- 5. Build the Multi-Ontology Knowledge Graph ---
 
@@ -358,20 +464,30 @@ def build_unified_medical_kg(df):
             if col in df.columns:
                 node_attrs[attr] = row[col]
 
-        guideline_url = row["url"]           if "url"        in df.columns else None
-        loinc_code    = row.get("loinc_code") if "loinc_code"  in df.columns else None
-        icd10_code    = row.get("icd10_code") if "icd10_code"  in df.columns else None
+        # Synonyms: stored as a list; normalise NaN (rows without a treatment
+        # or failed OLS lookups) to an empty list so the attribute is always iterable.
+        raw_synonyms = row.get("synonyms") if "synonyms" in df.columns else None
+        node_synonyms = raw_synonyms if isinstance(raw_synonyms, list) else []
 
-        G.add_node(primary_node, **node_attrs)
-        G.add_node(condition_node, type="Condition",       icd10_code=icd10_code)
+        guideline_url      = row["url"]                  if "url"               in df.columns else None
+        loinc_code         = row.get("loinc_code")       if "loinc_code"        in df.columns else None
+        icd10_code         = row.get("icd10_code")       if "icd10_code"        in df.columns else None
+        literature_weight  = row.get("literature_weight") if "literature_weight" in df.columns else None
+
+        G.add_node(primary_node, **node_attrs, synonyms=node_synonyms)
+        G.add_node(condition_node, type="Condition", icd10_code=icd10_code, synonyms=[])
         G.add_node(test_node,      type="Diagnostic_Test", guideline_source=row["source"],
                    guideline_url=guideline_url, loinc_code=loinc_code)
 
         # Three relationship edges per rule:
         #   (1) primary → condition  (2) condition → test  (3) primary → test (shortcut)
-        G.add_edge(primary_node,   condition_node, relationship="INDICATES_CONDITION",     source=row["source"], source_url=guideline_url)
-        G.add_edge(condition_node, test_node,      relationship="REQUIRES_TEST",           source=row["source"], source_url=guideline_url)
-        G.add_edge(primary_node,   test_node,      relationship="DIRECTLY_INDICATES_TEST", source=row["source"], source_url=guideline_url)
+        G.add_edge(primary_node,   condition_node, relationship="INDICATES_CONDITION",
+                   source=row["source"], source_url=guideline_url,
+                   literature_weight=literature_weight)
+        G.add_edge(condition_node, test_node,      relationship="REQUIRES_TEST",
+                   source=row["source"], source_url=guideline_url)
+        G.add_edge(primary_node,   test_node,      relationship="DIRECTLY_INDICATES_TEST",
+                   source=row["source"], source_url=guideline_url)
 
         # Treatment / Adverse Event sub-graph — only for rules that carry a treatment
         if "treatment" in df.columns and pd.notna(row.get("treatment")):
@@ -379,11 +495,13 @@ def build_unified_medical_kg(df):
             treatment_node = f"Treatment: {treatment_name}"
             rxcui         = row.get("rxcui")         if "rxcui"         in df.columns else None
             adverse_event = row.get("adverse_event") if "adverse_event" in df.columns else None
+            trial_count   = row.get("trial_count")   if "trial_count"   in df.columns else None
 
             G.add_node(treatment_node, type="Treatment", rxcui=rxcui)
             G.add_edge(condition_node, treatment_node,
                        relationship="RECOMMENDS_TREATMENT",
-                       source=row["source"], source_url=guideline_url)
+                       source=row["source"], source_url=guideline_url,
+                       trial_count=trial_count)
 
             if pd.notna(adverse_event):
                 adverse_event_node = f"Adverse Event: {str(adverse_event).title()}"
@@ -437,8 +555,8 @@ for test_node in spot_check_tests:
     else:
         print(f"  [{test_node}] NOT FOUND")
 
-# Spot-check one edge URL per pathway
-print("\n--- Edge URL Verification ---")
+# Spot-check one INDICATES_CONDITION edge per pathway
+print("\n--- Edge Verification (INDICATES_CONDITION) ---")
 spot_check_edges = [
     ("Symptom: Chest Pain",            "Condition: Acute Myocardial Infarction"),
     ("Symptom: Scrotal Pain",          "Condition: Testicular Torsion"),
@@ -449,8 +567,25 @@ for src, tgt in spot_check_edges:
     if kg.has_edge(src, tgt):
         edge_data = kg.edges[src, tgt]
         print(f"  ({src}) -> ({tgt})")
-        print(f"    source    : {edge_data.get('source')}")
-        print(f"    source_url: {edge_data.get('source_url')}")
+        print(f"    source           : {edge_data.get('source')}")
+        print(f"    source_url       : {edge_data.get('source_url')}")
+        print(f"    literature_weight: {edge_data.get('literature_weight')}")
+    else:
+        print(f"  EDGE NOT FOUND: ({src}) -> ({tgt})")
+
+# Spot-check RECOMMENDS_TREATMENT edges for trial_count
+print("\n--- Edge Verification (RECOMMENDS_TREATMENT) ---")
+recommends_edges = [
+    ("Condition: Acute Myocardial Infarction", "Treatment: Aspirin"),
+    ("Condition: Arm Fracture",               "Treatment: Ibuprofen"),
+    ("Condition: Wrist Fracture",             "Treatment: Ibuprofen"),
+]
+for src, tgt in recommends_edges:
+    if kg.has_edge(src, tgt):
+        edge_data = kg.edges[src, tgt]
+        print(f"  ({src}) -> ({tgt})")
+        print(f"    source     : {edge_data.get('source')}")
+        print(f"    trial_count: {edge_data.get('trial_count')}")
     else:
         print(f"  EDGE NOT FOUND: ({src}) -> ({tgt})")
 

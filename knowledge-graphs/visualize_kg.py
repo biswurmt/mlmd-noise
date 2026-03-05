@@ -1,3 +1,4 @@
+import math
 import pickle
 import pandas as pd
 from pyvis.network import Network
@@ -29,24 +30,40 @@ def visualize_interactive_kg(G):
         # Create a hover text string containing the metadata (e.g., SNOMED codes)
         hover_text = f"Type: {node_type}\n"
         for key, value in node_data.items():
-            if key != "type" and pd.notna(value):
+            if key == "type":
+                continue
+            # pd.notna() raises ValueError on lists/arrays — check type first
+            if isinstance(value, list):
+                if value:
+                    hover_text += f"{key}: {', '.join(str(v) for v in value)}\n"
+            elif pd.notna(value):
                 hover_text += f"{key}: {value}\n"
                 
         net.add_node(node_id, label=node_id, title=hover_text, color=color, shape="dot")
         
-    # Add edges with relationship labels
-    # --- NEW: Add edges with relationship labels AND source ---
+    # Add edges with relationship labels, guideline source, and evidence weights
     for source, target, edge_data in G.edges(data=True):
-        relationship = edge_data.get("relationship", "").replace("_", " ")
+        relationship     = edge_data.get("relationship", "").replace("_", " ")
         guideline_source = edge_data.get("source", "Unknown")
-        
-        # The label appears directly on the drawn arrow
+        literature_weight = edge_data.get("literature_weight")
+
+        # --- Edge width: log-scaled from Europe PMC hit count ---
+        # Only INDICATES_CONDITION edges carry literature_weight; all others
+        # default to width 1.  Scale: 1 hit → ~1px, 100 → ~5px, 10 000 → ~9px.
+        if literature_weight is not None and pd.notna(literature_weight) and literature_weight > 0:
+            edge_width = 1 + math.log10(literature_weight) * 2
+        else:
+            edge_width = 1
+
+        # --- Edge label (drawn on the arrow) ---
         edge_label = f"{relationship}\n[{guideline_source}]"
-        
-        # The title creates a tooltip when you hover your mouse over the arrow
+
+        # --- Hover tooltip ---
         hover_title = f"Relationship: {relationship}\nSource: {guideline_source}"
-        
-        net.add_edge(source, target, title=hover_title, label=edge_label)
+        if literature_weight is not None and pd.notna(literature_weight):
+            hover_title += f"\nEurope PMC co-occurrences: {int(literature_weight):,}"
+
+        net.add_edge(source, target, title=hover_title, label=edge_label, width=edge_width)
         
     # Add physics controls so you can adjust the layout in the browser
     net.show_buttons(filter_=['physics'])
