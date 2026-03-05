@@ -1,0 +1,70 @@
+[
+  {"_comment": "PATHWAY 1: ECG — AHA/ACC + CTAS | Acute Myocardial Infarction, Arrhythmia"},
+
+  {"raw_symptom": "chest pain",             "node_type": "Symptom",              "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC", "treatment": "Aspirin"},
+  {"raw_symptom": "shortness of breath",    "node_type": "Symptom",              "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "palpitations",           "node_type": "Symptom",              "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "syncope",                "node_type": "Symptom",              "condition": "Arrhythmia",                  "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "jaw pain",               "node_type": "Symptom",              "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "left arm pain",          "node_type": "Symptom",              "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "diaphoresis",            "node_type": "Symptom",              "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+
+  {"raw_symptom": "heart rate > 100",       "node_type": "Vital_Sign_Threshold", "condition": "Tachycardia",                 "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "heart rate < 60",        "node_type": "Vital_Sign_Threshold", "condition": "Bradycardia",                 "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "systolic bp > 180",      "node_type": "Vital_Sign_Threshold", "condition": "Hypertensive Emergency",      "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "systolic bp < 90",       "node_type": "Vital_Sign_Threshold", "condition": "Cardiogenic Shock",           "test": "ECG", "source": "AHA/ACC"},
+
+  {"raw_symptom": "prior cardiac history",  "node_type": "Risk_Factor",          "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "diabetes mellitus",      "node_type": "Risk_Factor",          "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+  {"raw_symptom": "hypertension",           "node_type": "Risk_Factor",          "condition": "Acute Myocardial Infarction", "test": "ECG", "source": "AHA/ACC"},
+
+  {"raw_symptom": "atypical chest pain",    "node_type": "Symptom",              "condition": "Potential Cardiac Ischemia",  "test": "ECG", "source": "CTAS"},
+  {"raw_symptom": "age > 35",               "node_type": "Demographic_Factor",   "condition": "Potential Cardiac Ischemia",  "test": "ECG", "source": "CTAS"},
+  {"raw_symptom": "heart rate > 120",       "node_type": "Vital_Sign_Threshold", "condition": "Tachycardia",                 "test": "ECG", "source": "CTAS"},
+
+  {"_comment": "PATHWAY 2: Testicular Ultrasound — ACR + NICE | Testicular Torsion, Epididymitis"},
+
+  {"raw_symptom": "scrotal pain",           "node_type": "Symptom",              "condition": "Testicular Torsion",           "test": "Testicular Ultrasound", "source": "ACR"},
+  {"raw_symptom": "groin pain",             "node_type": "Symptom",              "condition": "Testicular Torsion",           "test": "Testicular Ultrasound", "source": "ACR"},
+  {"raw_symptom": "testicular swelling",    "node_type": "Symptom",              "condition": "Testicular Torsion",           "test": "Testicular Ultrasound", "source": "ACR"},
+  {"raw_symptom": "nausea",                 "node_type": "Symptom",              "condition": "Testicular Torsion",           "test": "Testicular Ultrasound", "source": "ACR"},
+  {"raw_symptom": "vomiting",               "node_type": "Symptom",              "condition": "Testicular Torsion",           "test": "Testicular Ultrasound", "source": "ACR"},
+
+  {"raw_symptom": "sudden pain onset",      "node_type": "Clinical_Attribute",   "condition": "Testicular Torsion",           "test": "Testicular Ultrasound", "source": "ACR"},
+  {"raw_symptom": "gradual pain onset",     "node_type": "Clinical_Attribute",   "condition": "Epididymitis",                 "test": "Testicular Ultrasound", "source": "ACR"},
+
+  {"raw_symptom": "recent scrotal trauma",  "node_type": "Mechanism_of_Injury",  "condition": "Testicular Torsion",           "test": "Testicular Ultrasound", "source": "ACR"},
+
+  {"raw_symptom": "acute scrotal pain",     "node_type": "Symptom",              "condition": "Suspected Epididymo-orchitis", "test": "Testicular Ultrasound", "source": "NICE"},
+
+  {"_comment": "PATHWAY 3: Arm X-Ray — ACR | Arm / Wrist / Shoulder Fracture"},
+
+  {"raw_symptom": "arm pain",               "node_type": "Symptom",              "condition": "Arm Fracture",   "test": "Arm X-Ray", "source": "ACR", "treatment": "Ibuprofen"},
+  {"raw_symptom": "wrist pain",             "node_type": "Symptom",              "condition": "Wrist Fracture", "test": "Arm X-Ray", "source": "ACR", "treatment": "Ibuprofen"},
+  {"raw_symptom": "shoulder pain",          "node_type": "Symptom",              "condition": "Shoulder Fracture", "test": "Arm X-Ray", "source": "ACR"},
+  {"raw_symptom": "visible limb deformity", "node_type": "Symptom",              "condition": "Arm Fracture",   "test": "Arm X-Ray", "source": "ACR"},
+  {"raw_symptom": "localized arm swelling", "node_type": "Symptom",              "condition": "Arm Fracture",   "test": "Arm X-Ray", "source": "ACR"},
+
+  {"raw_symptom": "inability to bear weight",  "node_type": "Clinical_Attribute",  "condition": "Arm Fracture",   "test": "Arm X-Ray", "source": "ACR"},
+
+  {"raw_symptom": "fall on outstretched hand", "node_type": "Mechanism_of_Injury", "condition": "Wrist Fracture", "test": "Arm X-Ray", "source": "ACR"},
+  {"raw_symptom": "crush injury arm",          "node_type": "Mechanism_of_Injury", "condition": "Arm Fracture",   "test": "Arm X-Ray", "source": "ACR"},
+
+  {"_comment": "PATHWAY 4: Appendix/Abdominal Ultrasound — ACR + NICE | Acute Appendicitis, Ectopic Pregnancy, Ovarian Torsion"},
+
+  {"raw_symptom": "periumbilical pain",                      "node_type": "Symptom",              "condition": "Acute Appendicitis",        "test": "Appendix Ultrasound",  "source": "ACR"},
+  {"raw_symptom": "right lower quadrant pain",               "node_type": "Symptom",              "condition": "Acute Appendicitis",        "test": "Appendix Ultrasound",  "source": "ACR"},
+  {"raw_symptom": "diffuse abdominal pain",                  "node_type": "Symptom",              "condition": "Abdominal Aortic Aneurysm", "test": "Abdominal Ultrasound", "source": "ACR"},
+  {"raw_symptom": "nausea vomiting",                         "node_type": "Symptom",              "condition": "Acute Appendicitis",        "test": "Appendix Ultrasound",  "source": "ACR"},
+
+  {"raw_symptom": "fever > 37.3",                            "node_type": "Vital_Sign_Threshold", "condition": "Acute Appendicitis",        "test": "Appendix Ultrasound",  "source": "NICE"},
+
+  {"raw_symptom": "rebound tenderness",                      "node_type": "Clinical_Attribute",   "condition": "Acute Appendicitis",        "test": "Appendix Ultrasound",  "source": "ACR"},
+  {"raw_symptom": "periumbilical pain migrating to rlq",     "node_type": "Clinical_Attribute",   "condition": "Acute Appendicitis",        "test": "Appendix Ultrasound",  "source": "ACR"},
+
+  {"raw_symptom": "female of childbearing age",              "node_type": "Demographic_Factor",   "condition": "Ectopic Pregnancy",         "test": "Appendix Ultrasound",  "source": "ACR"},
+  {"raw_symptom": "female of childbearing age",              "node_type": "Demographic_Factor",   "condition": "Ovarian Torsion",           "test": "Appendix Ultrasound",  "source": "NICE"},
+  {"raw_symptom": "age < 18",                                "node_type": "Demographic_Factor",   "condition": "Pediatric Assessment",      "test": "Appendix Ultrasound",  "source": "ACR"},
+
+  {"raw_symptom": "right lower quadrant pain",               "node_type": "Symptom",              "condition": "Acute Appendicitis",        "test": "Appendix Ultrasound",  "source": "NICE"}
+]

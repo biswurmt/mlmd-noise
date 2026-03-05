@@ -1,3 +1,4 @@
+import json
 import requests
 import pandas as pd
 import networkx as nx
@@ -5,240 +6,491 @@ from dotenv import load_dotenv
 import os
 import pickle
 
-# --- 1. Curated Ground Truth ---
-guideline_rules = [
-    {"raw_symptom": "chest pain", "condition": "Acute Coronary Syndrome", "test": "ECG", "source": "AHA/ACC"},
-    {"raw_symptom": "syncope", "condition": "Arrhythmia", "test": "ECG", "source": "AHA/ACC"},
-    {"raw_symptom": "scrotal pain", "condition": "Testicular Torsion", "test": "Testicular Ultrasound", "source": "ACR"},
-    {"raw_symptom": "forearm trauma", "condition": "Forearm Fracture", "test": "Arm X-Ray", "source": "ACR"},
-    {"raw_symptom": "right lower quadrant pain", "condition": "Appendicitis", "test": "Appendix Ultrasound", "source": "ACR"},
-    {"raw_symptom": "diffuse abdominal pain", "condition": "Abdominal Aortic Aneurysm", "test": "Abdominal Ultrasound", "source": "ACR"},
-    # Adding rules based on Vitals and Demographics
-    {"raw_symptom": "heart rate > 120", "condition": "Tachycardia", "test": "ECG", "source": "AHA/ACC"},
-    # We map 'pediatric' as a demographic factor indicating a specific protocol
-    {"raw_symptom": "age < 18", "condition": "Pediatric Assessment", "test": "Appendix Ultrasound", "source": "ACR"},
-    # --- NICE Guidelines (UK) ---
-    # NICE explicitly dictates ultrasound for equivocal acute scrotal pain (checking for epididymo-orchitis vs torsion)
-    {"raw_symptom": "acute scrotal pain", "condition": "Suspected Epididymo-orchitis", "test": "Testicular Ultrasound", "source": "NICE"},
-    # NICE clinical pathway for appendicitis often relies on localized pain and fever
-    {"raw_symptom": "right lower quadrant pain", "condition": "Appendicitis", "test": "Appendix Ultrasound", "source": "NICE"},
-    {"raw_symptom": "fever > 37.3", "condition": "Appendicitis", "test": "Appendix Ultrasound", "source": "NICE"},
+# --- 1. Curated Ground Truth (4 Target Diagnostic Pathways) ---
+# Schema: raw_symptom | node_type | condition | test | source | treatment (optional)
+#
+# node_type vocabulary:
+#   Symptom              — clinical presenting symptoms
+#   Vital_Sign_Threshold — numeric vital sign cutoffs
+#   Demographic_Factor   — age / sex-based triage modifiers
+#   Risk_Factor          — pre-existing conditions / history
+#   Clinical_Attribute   — onset quality, exam findings, pain character
+#   Mechanism_of_Injury  — mechanism driving trauma presentations
+#
+# Rules are maintained in guideline_rules.json alongside this script.
+_DATA_FILE = os.path.join(os.path.dirname(__file__), "guideline_rules.json")
+with open(_DATA_FILE, "r") as _f:
+    _raw = json.load(_f)
 
-    # --- CTAS Modifiers (Canada) ---
-    # CTAS mandates an ECG within 10 minutes for chest pain with cardiac features, heavily weighted by age
-    {"raw_symptom": "atypical chest pain", "condition": "Potential Cardiac Ischemia", "test": "ECG", "source": "CTAS"},
-    {"raw_symptom": "age > 35", "condition": "Potential Cardiac Ischemia", "test": "ECG", "source": "CTAS"},
-    # CTAS First Order Modifier for Vitals
-    {"raw_symptom": "heart rate > 120", "condition": "Tachycardia", "test": "ECG", "source": "CTAS"}
-]
+# Strip comment-only entries (keys beginning with "_") before building the DataFrame
+guideline_rules = [r for r in _raw if "raw_symptom" in r]
 df_rules = pd.DataFrame(guideline_rules)
 
-# --- 2. API Keys & Tokens ---
-load_dotenv() # This loads the variables from the .env file
+# --- 1b. Guideline URL Grounding ---
+# Maps (source, test) → official guideline URL so every edge and Test node
+# carries a citable reference back to the primary source document.
+GUIDELINE_URLS = {
+    # ECG pathways
+    ("AHA/ACC", "ECG"): (
+        "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001029"
+        # 2021 AHA/ACC/ASE/CHEST/SAEM/SCCT/SCMR Guideline for the Evaluation
+        # and Diagnosis of Chest Pain — Circulation
+    ),
+    ("CTAS",    "ECG"): (
+        "https://www.cambridge.org/core/journals/canadian-journal-of-emergency-medicine"
+        "/article/revisions-to-the-canadian-emergency-department-triage-and-acuity-scale"
+        "-ctas-guidelines-2016/E2CB3E2063C54E11259313FA4FEAE495"
+        # Revisions to the CTAS Guidelines 2016 — CJEM
+    ),
 
-UMLS_API_KEY = os.getenv("UMLS_API_KEY")
-INFOWAY_CLIENT_ID = os.getenv("INFOWAY_CLIENT_ID")
+    # Testicular Ultrasound pathways
+    ("ACR",  "Testicular Ultrasound"): (
+        "https://acsearch.acr.org/docs/69363/Narrative"
+        # ACR AC® Acute Onset of Scrotal Pain — Without Trauma, Without
+        # Antecedent Mass (2024 update)
+    ),
+    ("NICE", "Testicular Ultrasound"): (
+        "https://cks.nice.org.uk/topics/scrotal-pain-swelling/"
+        # NICE CKS: Scrotal Pain and Swelling (last revised Aug 2024)
+    ),
+
+    # Arm X-Ray pathways
+    ("ACR",  "Arm X-Ray"): (
+        "https://acsearch.acr.org/docs/69418/narrative/"
+        # ACR AC® Acute Hand and Wrist Trauma
+    ),
+
+    # Appendix / Abdominal Ultrasound pathways
+    ("ACR",  "Appendix Ultrasound"): (
+        "https://acsearch.acr.org/docs/69357/narrative/"
+        # ACR AC® Right Lower Quadrant Pain — Suspected Appendicitis
+        # (2022 update)
+    ),
+    ("NICE", "Appendix Ultrasound"): (
+        "https://cks.nice.org.uk/topics/appendicitis"
+        # NICE CKS: Appendicitis (last revised May 2025)
+    ),
+    ("ACR",  "Abdominal Ultrasound"): (
+        "https://acsearch.acr.org/docs/69357/narrative/"
+        # ACR AC® Right Lower Quadrant Pain — closest applicable criteria
+    ),
+}
+
+df_rules["url"] = df_rules.apply(
+    lambda row: GUIDELINE_URLS.get((row["source"], row["test"]), None), axis=1
+)
+
+# --- 2. API Keys & Tokens ---
+load_dotenv()
+
+UMLS_API_KEY          = os.getenv("UMLS_API_KEY")
+INFOWAY_CLIENT_ID     = os.getenv("INFOWAY_CLIENT_ID")
 INFOWAY_CLIENT_SECRET = os.getenv("INFOWAY_CLIENT_SECRET")
 
-# --- 3. The API Functions (Kept exactly as you wrote them) ---
+
+# --- 3. API Functions ---
+
 def get_snomed_concept(term, api_key):
-    """
-    Queries the UMLS REST API to find the standardized SNOMED CT concept for a raw symptom.
+    """Query the UMLS REST API for a SNOMED CT US concept code."""
+    base_uri = "https://uts-ws.nlm.nih.gov/rest/search/current"
+    params = {
+        "string": term,
+        "sabs": "SNOMEDCT_US",
+        "returnIdType": "code",
+        "apiKey": api_key,
+    }
+    try:
+        response = requests.get(base_uri, params=params)
+        response.raise_for_status()
+        results = response.json().get("result", {}).get("results", [])
+        if results:
+            best = results[0]
+            return best["name"], best["ui"]
+        return term, None
+    except Exception as e:
+        print(f"  UMLS API error for '{term}': {e}")
+        return term, None
+
+
+def get_infoway_access_token(client_id, client_secret):
+    """Exchange Infoway client credentials for an OAuth2 access token."""
+    auth_url = (
+        "https://terminologystandardsservice.ca/authorisation/auth"
+        "/realms/terminology/protocol/openid-connect/token"
+    )
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    try:
+        response = requests.post(auth_url, data=payload, headers=headers)
+        response.raise_for_status()
+        return response.json().get("access_token")
+    except Exception as e:
+        print(f"  Infoway token error: {e}")
+        return None
+
+
+def get_infoway_snomed_concept(term, access_token):
+    """Query Canada Health Infoway FHIR API for a SNOMED CT CA concept."""
+    base_uri = "https://terminologystandardsservice.ca/fhir/ValueSet/$expand"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/fhir+json",
+    }
+    params = {
+        "url": "http://snomed.info/sct?fhir_vs",
+        "filter": term,
+        "count": 1,
+    }
+    try:
+        response = requests.get(base_uri, headers=headers, params=params)
+        response.raise_for_status()
+        contains = response.json().get("expansion", {}).get("contains", [])
+        if contains:
+            best = contains[0]
+            return best.get("display"), best.get("code")
+        return term, None
+    except Exception as e:
+        print(f"  Infoway API error for '{term}': {e}")
+        return term, None
+
+
+def get_open_medical_concept(term):
+    """Query EMBL-EBI OLS4 API for an open ontology concept (HP/MONDO/EFO). No key required."""
+    base_uri = "https://www.ebi.ac.uk/ols4/api/search"
+    params = {
+        "q": term,
+        "ontology": "hp,mondo,efo",
+        "queryFields": "label,synonym",
+        "exact": "false",
+        "rows": 1,
+    }
+    try:
+        response = requests.get(base_uri, params=params)
+        response.raise_for_status()
+        docs = response.json().get("response", {}).get("docs", [])
+        if docs:
+            best = docs[0]
+            return best.get("label"), best.get("short_form")
+        return term, None
+    except Exception as e:
+        print(f"  EBI OLS API error for '{term}': {e}")
+        return term, None
+
+
+def get_umls_concept(term, sabs, api_key):
+    """Query the UMLS REST API for any vocabulary supported by the sabs parameter.
+
+    Examples:
+        sabs="LNC"      → LOINC codes for diagnostic tests
+        sabs="ICD10CM"  → ICD-10-CM codes for conditions
+    Returns (canonical_name, code) or (term, None) on failure.
     """
     base_uri = "https://uts-ws.nlm.nih.gov/rest/search/current"
     params = {
         "string": term,
-        "sabs": "SNOMEDCT_US", # Restrict search specifically to SNOMED CT
+        "sabs": sabs,
         "returnIdType": "code",
-        "apiKey": api_key
+        "apiKey": api_key,
     }
-    
     try:
         response = requests.get(base_uri, params=params)
         response.raise_for_status()
-        data = response.json()
-        
-        # Extract the best matching concept name and ID
-        results = data.get("result", {}).get("results", [])
+        results = response.json().get("result", {}).get("results", [])
         if results:
-            best_match = results[0]
-            return best_match["name"], best_match["ui"] # Returns (Standard Name, SNOMED Code)
+            best = results[0]
+            return best["name"], best["ui"]
         return term, None
     except Exception as e:
-        print(f"API Error for term '{term}': {e}")
+        print(f"  UMLS ({sabs}) error for '{term}': {e}")
         return term, None
 
-def get_infoway_access_token(client_id, client_secret):
+
+def get_rxnorm_rxcui(term):
+    """Query the free NLM RxNorm REST API for an RxCUI given a drug name.
+
+    Returns the RxCUI string, or None if not found.
     """
-    Exchanges a Client ID and Client Secret for an OAuth2 Access Token
-    from Canada Health Infoway's authorization server.
-    """
-    auth_url = "https://terminologystandardsservice.ca/authorisation/auth/realms/terminology/protocol/openid-connect/token"
-    
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret
-    }
-    
-    # The payload must be sent as form data (application/x-www-form-urlencoded)
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    
+    url = f"https://rxnav.nlm.nih.gov/REST/rxcui.json?name={requests.utils.quote(term)}"
     try:
-        response = requests.post(auth_url, data=payload, headers=headers)
-        response.raise_for_status() # Will raise an exception for 4xx/5xx errors
-        token_data = response.json()
-        
-        return token_data.get("access_token")
-        
+        response = requests.get(url)
+        response.raise_for_status()
+        id_group = response.json().get("idGroup", {})
+        rxcuis = id_group.get("rxnormId", [])
+        return rxcuis[0] if rxcuis else None
     except Exception as e:
-        print(f"Failed to obtain access token: {e}")
+        print(f"  RxNorm API error for '{term}': {e}")
         return None
 
-def get_infoway_snomed_concept(term, access_token):
-    """
-    Queries Canada Health Infoway's FHIR API to find a SNOMED CT CA concept.
-    """
-    # The official Canadian FHIR Terminology Service endpoint
-    base_uri = "https://terminologystandardsservice.ca/fhir/ValueSet/$expand"
-    
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/fhir+json"
-    }
-    
-    # Standard FHIR search parameters filtering for the SNOMED CT CA CodeSystem
-    params = {
-        "url": "http://snomed.info/sct?fhir_vs", # Target SNOMED
-        "filter": term,
-        "count": 1
-    }
-    
-    try:
-        response = requests.get(base_uri, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Extract the concept from the FHIR expansion payload
-        contains = data.get("expansion", {}).get("contains", [])
-        if contains:
-            best_match = contains[0]
-            # Returns (Standard Name, SNOMED Code)
-            return best_match.get("display"), best_match.get("code")
-        return term, None
-        
-    except Exception as e:
-        print(f"Infoway API Error for term '{term}': {e}")
-        return term, None
 
-def get_open_medical_concept(term):
+def get_openfda_adverse_event(term):
+    """Query the OpenFDA drug adverse event API for the most-reported reaction
+    to a given medication.
+
+    Returns the reaction MedDRA term string, or None if not found.
     """
-    Queries the EMBL-EBI OLS API to find a standardized medical concept WITHOUT an API key.
-    It targets HP (Phenotypes/Symptoms), MONDO (Diseases), and EFO (Experimental Factors).
-    """
-    base_uri = "https://www.ebi.ac.uk/ols4/api/search"
+    url = "https://api.fda.gov/drug/event.json"
     params = {
-        "q": term,
-        # Restrict search to the best clinical open ontologies
-        "ontology": "hp,mondo,efo", 
-        "queryFields": "label,synonym",
-        "exact": "false",
-        "rows": 1
+        "search": f'patient.drug.medicinalproduct:"{term}"',
+        "count": "patient.reaction.reactionmeddrapt.exact",
+        "limit": 1,
     }
-    
     try:
-        response = requests.get(base_uri, params=params)
+        response = requests.get(url, params=params)
         response.raise_for_status()
-        data = response.json()
-        
-        # Extract the best matching concept
-        results = data.get("response", {}).get("docs", [])
+        results = response.json().get("results", [])
         if results:
-            best_match = results[0]
-            # Returns (Standard Name, Ontology ID like 'HP_0002027')
-            return best_match.get("label"), best_match.get("short_form") 
-        return term, None
+            return results[0].get("term")
+        return None
     except Exception as e:
-        print(f"API Error for term '{term}': {e}")
-        return term, None
+        print(f"  OpenFDA API error for '{term}': {e}")
+        return None
 
-# --- 4. The Unified Extraction Pipeline ---
+
+# --- 4. Ontology Extraction Pipeline ---
+
 print("Extracting cross-mapped ontology codes...")
 
-# 1. Get US SNOMED (UMLS) # Currently no API Access Token
+# 1. US SNOMED via UMLS (requires a provisioned key — commented out until available)
 # df_rules[['umls_name', 'umls_code']] = df_rules.apply(
 #     lambda row: pd.Series(get_snomed_concept(row['raw_symptom'], UMLS_API_KEY)), axis=1
 # )
 
-# 2. Get Open Ontologies (EMBL-EBI)
+# 2. Open ontology codes via EMBL-EBI OLS (no key required)
 df_rules[['ebi_name', 'ebi_code']] = df_rules.apply(
     lambda row: pd.Series(get_open_medical_concept(row['raw_symptom'])), axis=1
 )
 
-# 3. Get Canadian SNOMED (Infoway)
-
-# 3.2. Fetch the fresh token
-print("Fetching access token...")
+# 3. Canadian SNOMED CT via Canada Health Infoway
+print("Fetching Infoway access token...")
 INFOWAY_TOKEN = get_infoway_access_token(INFOWAY_CLIENT_ID, INFOWAY_CLIENT_SECRET)
 
 if INFOWAY_TOKEN:
+    print("Token obtained. Querying Infoway FHIR API...")
     df_rules[['infoway_name', 'infoway_code']] = df_rules.apply(
         lambda row: pd.Series(get_infoway_snomed_concept(row['raw_symptom'], INFOWAY_TOKEN)), axis=1
     )
+else:
+    print("  WARNING: Infoway token unavailable — Canadian SNOMED CT codes will be omitted.")
 
-# --- 5. Building the Multi-Ontology Knowledge Graph (Refined Schema) ---
+# 4. LOINC codes via UMLS — one lookup per unique test name to avoid redundant calls
+if UMLS_API_KEY:
+    print("Looking up LOINC codes via UMLS...")
+    loinc_map = {}
+    for test_name in df_rules["test"].unique():
+        _, code = get_umls_concept(test_name, "LNC", UMLS_API_KEY)
+        loinc_map[test_name] = code
+    df_rules["loinc_code"] = df_rules["test"].map(loinc_map)
+else:
+    print("  WARNING: UMLS API key unavailable — LOINC codes will be omitted.")
+    df_rules["loinc_code"] = None
+
+# 5. ICD-10-CM codes via UMLS — one lookup per unique condition name
+if UMLS_API_KEY:
+    print("Looking up ICD-10-CM codes via UMLS...")
+    icd10_map = {}
+    for condition_name in df_rules["condition"].unique():
+        _, code = get_umls_concept(condition_name, "ICD10CM", UMLS_API_KEY)
+        icd10_map[condition_name] = code
+    df_rules["icd10_code"] = df_rules["condition"].map(icd10_map)
+else:
+    print("  WARNING: UMLS API key unavailable — ICD-10-CM codes will be omitted.")
+    df_rules["icd10_code"] = None
+
+# 6. RxNorm RxCUI + OpenFDA adverse events — only for rows that carry a treatment
+if "treatment" in df_rules.columns:
+    unique_treatments = df_rules["treatment"].dropna().unique()
+    if len(unique_treatments) > 0:
+        print("Looking up RxNorm and OpenFDA data for treatments...")
+        rxcui_map         = {}
+        adverse_event_map = {}
+        for drug in unique_treatments:
+            rxcui_map[drug]         = get_rxnorm_rxcui(drug)
+            adverse_event_map[drug] = get_openfda_adverse_event(drug)
+        df_rules["rxcui"]         = df_rules["treatment"].map(rxcui_map)
+        df_rules["adverse_event"] = df_rules["treatment"].map(adverse_event_map)
+
+
+# --- 5. Build the Multi-Ontology Knowledge Graph ---
+
+# Node-type prefix mapping (used as the node ID prefix in the graph)
+_NODE_PREFIX = {
+    "Symptom":             "Symptom",
+    "Vital_Sign_Threshold":"Vital",
+    "Demographic_Factor":  "Demographic",
+    "Risk_Factor":         "Risk Factor",
+    "Clinical_Attribute":  "Attribute",
+    "Mechanism_of_Injury": "MOI",
+}
+
+def _resolve_node_type(row, df):
+    """Return (node_type, node_prefix) using the explicit node_type column when present,
+    falling back to the original heuristic for legacy rows."""
+    if "node_type" in df.columns and pd.notna(row.get("node_type")):
+        nt = row["node_type"]
+        return nt, _NODE_PREFIX.get(nt, "Node")
+
+    # Legacy heuristic: infer type from raw_symptom string
+    raw = row["raw_symptom"]
+    if ">" in raw or "<" in raw:
+        if "age" in raw:
+            return "Demographic_Factor", "Demographic"
+        return "Vital_Sign_Threshold", "Vital"
+    return "Symptom", "Symptom"
+
+
 def build_unified_medical_kg(df):
     G = nx.DiGraph()
-    
-    for _, row in df.iterrows():
-        # 1. Dynamic Node Typing
-        # Determine if the 'raw_symptom' is actually a vital sign or demographic
-        if ">" in row['raw_symptom'] or "<" in row['raw_symptom']:
-            if "age" in row['raw_symptom']:
-                node_type = "Demographic_Factor"
-                node_prefix = "Demographic"
-            else:
-                node_type = "Vital_Sign_Threshold"
-                node_prefix = "Vital"
-        else:
-            node_type = "Symptom"
-            node_prefix = "Symptom"
 
-        primary_node = f"{node_prefix}: {row['raw_symptom'].title()}"
+    for _, row in df.iterrows():
+        node_type, node_prefix = _resolve_node_type(row, df)
+
+        primary_node   = f"{node_prefix}: {row['raw_symptom'].title()}"
         condition_node = f"Condition: {row['condition']}"
-        test_node = f"Test: {row['test']}"
-        
-        # 2. Add the primary node with ALL extracted codes as metadata
-        G.add_node(primary_node, 
-                   type=node_type, 
-                #    snomed_us_code=row['umls_code'],
-                   snomed_ca_code=row['infoway_code'],
-                   ebi_open_code=row['ebi_code'])
-                   
-        G.add_node(condition_node, type="Condition")
-        G.add_node(test_node, type="Diagnostic_Test", guideline_source=row['source'])
-        
-        # 3. Add relationships (Including the missing shortcut edge!)
-        # Add relationships with the source attached to the edge!
-        G.add_edge(primary_node, condition_node, relationship="INDICATES_CONDITION", source=row['source'])
-        G.add_edge(condition_node, test_node, relationship="REQUIRES_TEST", source=row['source'])
-        G.add_edge(primary_node, test_node, relationship="DIRECTLY_INDICATES_TEST", source=row['source'])
-        
+        test_node      = f"Test: {row['test']}"
+
+        # Build node attribute dict; include ontology codes when available
+        node_attrs = {"type": node_type}
+        for col, attr in [("ebi_code", "ebi_open_code"), ("infoway_code", "snomed_ca_code")]:
+            if col in df.columns:
+                node_attrs[attr] = row[col]
+
+        guideline_url = row["url"]           if "url"        in df.columns else None
+        loinc_code    = row.get("loinc_code") if "loinc_code"  in df.columns else None
+        icd10_code    = row.get("icd10_code") if "icd10_code"  in df.columns else None
+
+        G.add_node(primary_node, **node_attrs)
+        G.add_node(condition_node, type="Condition",       icd10_code=icd10_code)
+        G.add_node(test_node,      type="Diagnostic_Test", guideline_source=row["source"],
+                   guideline_url=guideline_url, loinc_code=loinc_code)
+
+        # Three relationship edges per rule:
+        #   (1) primary → condition  (2) condition → test  (3) primary → test (shortcut)
+        G.add_edge(primary_node,   condition_node, relationship="INDICATES_CONDITION",     source=row["source"], source_url=guideline_url)
+        G.add_edge(condition_node, test_node,      relationship="REQUIRES_TEST",           source=row["source"], source_url=guideline_url)
+        G.add_edge(primary_node,   test_node,      relationship="DIRECTLY_INDICATES_TEST", source=row["source"], source_url=guideline_url)
+
+        # Treatment / Adverse Event sub-graph — only for rules that carry a treatment
+        if "treatment" in df.columns and pd.notna(row.get("treatment")):
+            treatment_name = row["treatment"]
+            treatment_node = f"Treatment: {treatment_name}"
+            rxcui         = row.get("rxcui")         if "rxcui"         in df.columns else None
+            adverse_event = row.get("adverse_event") if "adverse_event" in df.columns else None
+
+            G.add_node(treatment_node, type="Treatment", rxcui=rxcui)
+            G.add_edge(condition_node, treatment_node,
+                       relationship="RECOMMENDS_TREATMENT",
+                       source=row["source"], source_url=guideline_url)
+
+            if pd.notna(adverse_event):
+                adverse_event_node = f"Adverse Event: {str(adverse_event).title()}"
+                G.add_node(adverse_event_node, type="Adverse_Event")
+                G.add_edge(treatment_node, adverse_event_node,
+                           relationship="HAS_ADVERSE_EVENT")
+
     return G
+
 
 kg = build_unified_medical_kg(df_rules)
 
-# Save the NetworkX graph to a file
-with open('triage_knowledge_graph.pkl', 'wb') as f:
+# Save the compiled graph
+with open("triage_knowledge_graph.pkl", "wb") as f:
     pickle.dump(kg, f)
 
-print("\nKnowledge Graph successfully saved to 'triage_knowledge_graph.pkl'")
+print(f"\nKnowledge graph saved to 'triage_knowledge_graph.pkl'")
+print(f"  Nodes : {kg.number_of_nodes()}")
+print(f"  Edges : {kg.number_of_edges()}")
 
-# Let's inspect one of the nodes to see the merged data!
+# --- 6. Spot-check a selection of expected nodes ---
 print("\n--- Node Inspection ---")
-example_node = "Symptom: Chest Pain"
-if example_node in kg.nodes:
-    print(f"Properties for '{example_node}':")
-    print(kg.nodes[example_node])
+spot_check_nodes = [
+    "Symptom: Chest Pain",
+    "Risk Factor: Hypertension",
+    "MOI: Fall On Outstretched Hand",
+    "Attribute: Rebound Tenderness",
+    "Attribute: Sudden Pain Onset",
+    "Demographic: Female Of Childbearing Age",
+]
+for node in spot_check_nodes:
+    if node in kg.nodes:
+        print(f"  [{node}] -> {dict(kg.nodes[node])}")
+    else:
+        print(f"  [{node}] NOT FOUND")
+
+# --- 7. Spot-check guideline URLs on Test nodes and edges ---
+print("\n--- Guideline URL Verification ---")
+spot_check_tests = [
+    "Test: ECG",
+    "Test: Testicular Ultrasound",
+    "Test: Arm X-Ray",
+    "Test: Appendix Ultrasound",
+]
+for test_node in spot_check_tests:
+    if test_node in kg.nodes:
+        attrs = kg.nodes[test_node]
+        print(f"  [{test_node}]")
+        print(f"    source      : {attrs.get('guideline_source')}")
+        print(f"    guideline_url: {attrs.get('guideline_url')}")
+    else:
+        print(f"  [{test_node}] NOT FOUND")
+
+# Spot-check one edge URL per pathway
+print("\n--- Edge URL Verification ---")
+spot_check_edges = [
+    ("Symptom: Chest Pain",            "Condition: Acute Myocardial Infarction"),
+    ("Symptom: Scrotal Pain",          "Condition: Testicular Torsion"),
+    ("MOI: Fall On Outstretched Hand", "Condition: Wrist Fracture"),
+    ("Attribute: Rebound Tenderness",  "Condition: Acute Appendicitis"),
+]
+for src, tgt in spot_check_edges:
+    if kg.has_edge(src, tgt):
+        edge_data = kg.edges[src, tgt]
+        print(f"  ({src}) -> ({tgt})")
+        print(f"    source    : {edge_data.get('source')}")
+        print(f"    source_url: {edge_data.get('source_url')}")
+    else:
+        print(f"  EDGE NOT FOUND: ({src}) -> ({tgt})")
+
+# --- 8. Spot-check new ontology codes and Treatment / Adverse Event nodes ---
+print("\n--- LOINC & ICD-10 Code Verification ---")
+loinc_spot_checks = [
+    "Test: ECG",
+    "Test: Arm X-Ray",
+    "Test: Appendix Ultrasound",
+    "Test: Testicular Ultrasound",
+]
+for node in loinc_spot_checks:
+    if node in kg.nodes:
+        attrs = kg.nodes[node]
+        print(f"  [{node}]  loinc_code={attrs.get('loinc_code')}")
+    else:
+        print(f"  [{node}] NOT FOUND")
+
+icd10_spot_checks = [
+    "Condition: Acute Myocardial Infarction",
+    "Condition: Arm Fracture",
+    "Condition: Wrist Fracture",
+    "Condition: Acute Appendicitis",
+]
+for node in icd10_spot_checks:
+    if node in kg.nodes:
+        attrs = kg.nodes[node]
+        print(f"  [{node}]  icd10_code={attrs.get('icd10_code')}")
+    else:
+        print(f"  [{node}] NOT FOUND")
+
+print("\n--- Treatment & Adverse Event Node Verification ---")
+treatment_spot_checks = ["Treatment: Aspirin", "Treatment: Ibuprofen"]
+for node in treatment_spot_checks:
+    if node in kg.nodes:
+        attrs = kg.nodes[node]
+        print(f"  [{node}]  rxcui={attrs.get('rxcui')}")
+        # Print the outgoing HAS_ADVERSE_EVENT edges
+        for _, tgt, edge_data in kg.out_edges(node, data=True):
+            if edge_data.get("relationship") == "HAS_ADVERSE_EVENT":
+                print(f"    -> HAS_ADVERSE_EVENT -> [{tgt}]")
+    else:
+        print(f"  [{node}] NOT FOUND")

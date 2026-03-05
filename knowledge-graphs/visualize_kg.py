@@ -11,11 +11,14 @@ def visualize_interactive_kg(G):
     
     # Color palette for node types
     color_map = {
-        "Symptom": "#ff9999",               # Red/Pink
-        "Condition": "#99ccff",             # Blue
-        "Diagnostic_Test": "#99ff99",       # Green
-        "Vital_Sign_Threshold": "#ffcc99",  # Orange
-        "Demographic_Factor": "#cc99ff"     # Purple
+        "Symptom":             "#ff9999",   # Red/Pink
+        "Condition":           "#99ccff",   # Blue
+        "Diagnostic_Test":     "#99ff99",   # Green
+        "Vital_Sign_Threshold":"#ffcc99",   # Orange
+        "Demographic_Factor":  "#cc99ff",   # Purple
+        "Risk_Factor":         "#ffff99",   # Yellow
+        "Mechanism_of_Injury": "#ff99cc",   # Rose
+        "Clinical_Attribute":  "#99ffee",   # Mint
     }
     
     # Add nodes with their specific colors and titles (hover text)
