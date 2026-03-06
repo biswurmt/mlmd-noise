@@ -398,7 +398,19 @@ df_rules["literature_weight"] = df_rules.apply(
     lambda row: lit_weight_map.get((row["raw_symptom"], row["condition"]), 0), axis=1
 )
 
-# 8. ClinicalTrials.gov trial counts (condition ↔ treatment)
+# 8. Europe PMC literature co-occurrence weights (condition ↔ test)
+#    Same pattern as step 7; deduplicates to unique (condition, test) pairs.
+print("Fetching Europe PMC literature co-occurrence weights (condition ↔ test)...")
+unique_ct_lit_pairs = df_rules[["condition", "test"]].drop_duplicates()
+test_lit_weight_map = {}
+for _, pair in unique_ct_lit_pairs.iterrows():
+    test_lit_weight_map[(pair["condition"], pair["test"])] = \
+        get_literature_cooccurrence(pair["condition"], pair["test"])
+df_rules["test_literature_weight"] = df_rules.apply(
+    lambda row: test_lit_weight_map.get((row["condition"], row["test"]), 0), axis=1
+)
+
+# 9. ClinicalTrials.gov trial counts (condition ↔ treatment)
 #    Only rows with a treatment value are queried; others receive None.
 if "treatment" in df_rules.columns:
     unique_ct_pairs = (
@@ -469,10 +481,11 @@ def build_unified_medical_kg(df):
         raw_synonyms = row.get("synonyms") if "synonyms" in df.columns else None
         node_synonyms = raw_synonyms if isinstance(raw_synonyms, list) else []
 
-        guideline_url      = row["url"]                  if "url"               in df.columns else None
-        loinc_code         = row.get("loinc_code")       if "loinc_code"        in df.columns else None
-        icd10_code         = row.get("icd10_code")       if "icd10_code"        in df.columns else None
-        literature_weight  = row.get("literature_weight") if "literature_weight" in df.columns else None
+        guideline_url         = row["url"]                       if "url"                    in df.columns else None
+        loinc_code            = row.get("loinc_code")            if "loinc_code"             in df.columns else None
+        icd10_code            = row.get("icd10_code")            if "icd10_code"             in df.columns else None
+        literature_weight     = row.get("literature_weight")     if "literature_weight"      in df.columns else None
+        test_literature_weight = row.get("test_literature_weight") if "test_literature_weight" in df.columns else None
 
         G.add_node(primary_node, **node_attrs, synonyms=node_synonyms)
         G.add_node(condition_node, type="Condition", icd10_code=icd10_code, synonyms=[])
@@ -485,7 +498,8 @@ def build_unified_medical_kg(df):
                    source=row["source"], source_url=guideline_url,
                    literature_weight=literature_weight)
         G.add_edge(condition_node, test_node,      relationship="REQUIRES_TEST",
-                   source=row["source"], source_url=guideline_url)
+                   source=row["source"], source_url=guideline_url,
+                   test_literature_weight=test_literature_weight)
         G.add_edge(primary_node,   test_node,      relationship="DIRECTLY_INDICATES_TEST",
                    source=row["source"], source_url=guideline_url)
 
@@ -570,6 +584,23 @@ for src, tgt in spot_check_edges:
         print(f"    source           : {edge_data.get('source')}")
         print(f"    source_url       : {edge_data.get('source_url')}")
         print(f"    literature_weight: {edge_data.get('literature_weight')}")
+    else:
+        print(f"  EDGE NOT FOUND: ({src}) -> ({tgt})")
+
+# Spot-check REQUIRES_TEST edges for test_literature_weight
+print("\n--- Edge Verification (REQUIRES_TEST) ---")
+requires_test_edges = [
+    ("Condition: Acute Myocardial Infarction", "Test: ECG"),
+    ("Condition: Testicular Torsion",          "Test: Testicular Ultrasound"),
+    ("Condition: Wrist Fracture",              "Test: Arm X-Ray"),
+    ("Condition: Acute Appendicitis",          "Test: Appendix Ultrasound"),
+]
+for src, tgt in requires_test_edges:
+    if kg.has_edge(src, tgt):
+        edge_data = kg.edges[src, tgt]
+        print(f"  ({src}) -> ({tgt})")
+        print(f"    source                : {edge_data.get('source')}")
+        print(f"    test_literature_weight: {edge_data.get('test_literature_weight')}")
     else:
         print(f"  EDGE NOT FOUND: ({src}) -> ({tgt})")
 

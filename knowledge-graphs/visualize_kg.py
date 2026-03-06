@@ -45,13 +45,23 @@ def visualize_interactive_kg(G):
     for source, target, edge_data in G.edges(data=True):
         relationship     = edge_data.get("relationship", "").replace("_", " ")
         guideline_source = edge_data.get("source", "Unknown")
-        literature_weight = edge_data.get("literature_weight")
+
+        # Each edge type carries its own Europe PMC weight attribute:
+        #   INDICATES_CONDITION → literature_weight
+        #   REQUIRES_TEST       → test_literature_weight
+        # Resolve whichever is present (they are mutually exclusive by edge type).
+        literature_weight      = edge_data.get("literature_weight")
+        test_literature_weight = edge_data.get("test_literature_weight")
+        active_weight = (
+            literature_weight      if (literature_weight      is not None and pd.notna(literature_weight))
+            else test_literature_weight if (test_literature_weight is not None and pd.notna(test_literature_weight))
+            else None
+        )
 
         # --- Edge width: log-scaled from Europe PMC hit count ---
-        # Only INDICATES_CONDITION edges carry literature_weight; all others
-        # default to width 1.  Scale: 1 hit → ~1px, 100 → ~5px, 10 000 → ~9px.
-        if literature_weight is not None and pd.notna(literature_weight) and literature_weight > 0:
-            edge_width = 1 + math.log10(literature_weight) * 2
+        # Scale: 1 hit → ~1px, 100 → ~5px, 10 000 → ~9px.
+        if active_weight is not None and active_weight > 0:
+            edge_width = 1 + math.log10(active_weight) * 2
         else:
             edge_width = 1
 
@@ -60,8 +70,8 @@ def visualize_interactive_kg(G):
 
         # --- Hover tooltip ---
         hover_title = f"Relationship: {relationship}\nSource: {guideline_source}"
-        if literature_weight is not None and pd.notna(literature_weight):
-            hover_title += f"\nEurope PMC co-occurrences: {int(literature_weight):,}"
+        if active_weight is not None:
+            hover_title += f"\nEurope PMC co-occurrences: {int(active_weight):,}"
 
         net.add_edge(source, target, title=hover_title, label=edge_label, width=edge_width)
         
