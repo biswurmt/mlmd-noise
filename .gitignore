@@ -205,3 +205,23 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ── Project-specific ──────────────────────────────────────────────────────────
+
+# Secrets — never commit API keys or OAuth credentials
+knowledge-graphs/.env
+
+# Generated graph artefacts (large binary / auto-regenerated)
+knowledge-graphs/*.pkl
+knowledge-graphs/*.html
+
+# Frontend dependencies and build output
+diagnotix/frontend/node_modules/
+diagnotix/frontend/dist/
+diagnotix/frontend/.vite/
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+CLAUDE.md
