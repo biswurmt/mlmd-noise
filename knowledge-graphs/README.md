@@ -71,6 +71,116 @@ python triage_extraction_pipeline.py --kg-path /path/to/triage_knowledge_graph.p
 
 ---
 
+## How the Knowledge Graph Was Built
+
+The graph is constructed by `build_kg.py` in a nine-step pipeline. Each step enriches a shared pandas DataFrame (`df_rules`) before the final graph object is assembled and serialised.
+
+### Step 0 — Curated Ground-Truth Rules
+
+Everything starts with `guideline_rules.json`, a hand-authored list of 45 clinical rules drawn from four evidence-based guidelines. Each rule encodes one clinical observation (a symptom, vital sign threshold, demographic factor, risk factor, clinical attribute, or mechanism of injury), the condition it suggests, and the diagnostic test that condition warrants. Three rules additionally carry a `treatment` field for first-line pharmacological management.
+
+```
+raw_symptom  ──→  condition  ──→  test  (+ optional treatment)
+    │
+  node_type (Symptom | Vital_Sign_Threshold | Risk_Factor | ...)
+  source    (AHA/ACC | ACR | NICE | CTAS)
+```
+
+The four diagnostic pathways covered:
+
+| Pathway | Guidelines | Target conditions |
+|---|---|---|
+| ECG | AHA/ACC, CTAS | Acute MI, Arrhythmia, Tachycardia, Cardiogenic Shock |
+| Testicular Ultrasound | ACR, NICE | Testicular Torsion, Epididymitis |
+| Arm X-Ray | ACR | Arm / Wrist / Shoulder Fracture |
+| Appendix Ultrasound | ACR, NICE | Acute Appendicitis, Ectopic Pregnancy, Ovarian Torsion |
+
+---
+
+### Step 1 — Guideline URL Grounding
+
+A static `GUIDELINE_URLS` dict maps every `(source, test)` pair to the DOI or official page of the originating guideline document. The URL is applied to `df_rules` as a `url` column and later stamped onto every edge and Test node in the graph, making every clinical assertion directly traceable to its primary source.
+
+---
+
+### Steps 2–6 — Ontology Enrichment via External APIs
+
+Six APIs are queried to attach standardised medical codes to each row. Lookups are deduplicated where possible (e.g. LOINC is fetched once per unique test name, not once per row) to minimise network calls.
+
+| Step | API | Credential | Enriches | Column(s) added |
+|---|---|---|---|---|
+| 2 | EMBL-EBI OLS4 (HP/MONDO/EFO) | None | `raw_symptom` | `ebi_name`, `ebi_code`, `synonyms` |
+| 3 | Canada Health Infoway FHIR (SNOMED CT CA) | OAuth2 client credentials | `raw_symptom` | `infoway_name`, `infoway_code` |
+| 4 | UMLS REST API (LOINC) | `UMLS_API_KEY` | `test` (unique values only) | `loinc_code` |
+| 5 | UMLS REST API (ICD-10-CM) | `UMLS_API_KEY` | `condition` (unique values only) | `icd10_code` |
+| 6 | NLM RxNorm + OpenFDA | None | `treatment` (where present) | `rxcui`, `adverse_event` |
+
+The EBI OLS4 step also extracts the `synonym` field from the top-ranked ontology match and stores it as a Python list. These synonyms are later used by `kg_fact_checker.py` to improve evidence-lookup recall when the primary term returns too few results.
+
+---
+
+### Steps 7–9 — Evidence Weighting via Literature and Trial APIs
+
+Three further API calls attach real-world evidence counts directly to the DataFrame before the graph is assembled. These counts become numeric edge attributes that drive edge-width scaling in the HTML visualisation.
+
+| Step | API | Query pair | Column added | Used on edge |
+|---|---|---|---|---|
+| 7 | Europe PMC REST search | `raw_symptom` ↔ `condition` | `literature_weight` | `INDICATES_CONDITION` |
+| 8 | Europe PMC REST search | `condition` ↔ `test` | `test_literature_weight` | `REQUIRES_TEST` |
+| 9 | ClinicalTrials.gov v2 | `condition` ↔ `treatment` | `trial_count` | `RECOMMENDS_TREATMENT` |
+
+Both Europe PMC steps deduplicate to unique pairs before hitting the API and use a shared in-memory cache (`_lit_cache`) so repeated term combinations are never re-fetched. The ClinicalTrials step only runs for the three rules that carry a `treatment` value.
+
+---
+
+### Final Step — Graph Assembly
+
+`build_unified_medical_kg(df)` iterates the fully-enriched DataFrame once and constructs the NetworkX `DiGraph`. For every row it creates up to five nodes and up to five edges:
+
+```
+[Primary]──INDICATES_CONDITION──▶[Condition]──REQUIRES_TEST──▶[Test]
+    │                                  │
+    └──DIRECTLY_INDICATES_TEST─────────┘
+                                       │
+                               RECOMMENDS_TREATMENT
+                                       │
+                                  [Treatment]──HAS_ADVERSE_EVENT──▶[Adverse Event]
+```
+
+Every node carries the ontology codes and synonyms fetched in Steps 2–6. Every edge carries the guideline `source`, `source_url`, and the appropriate evidence-weight attribute from Steps 7–9. The completed graph is serialised to `triage_knowledge_graph.pkl` with `pickle`.
+
+---
+
+### Data Flow Diagram
+
+```
+guideline_rules.json
+        │
+        ▼
+   df_rules (DataFrame)
+        │
+        ├─ Step 1 ──→ url            (GUIDELINE_URLS static map)
+        ├─ Step 2 ──→ ebi_code, synonyms         (EBI OLS4)
+        ├─ Step 3 ──→ infoway_code               (Infoway FHIR)
+        ├─ Step 4 ──→ loinc_code                 (UMLS / LNC)
+        ├─ Step 5 ──→ icd10_code                 (UMLS / ICD10CM)
+        ├─ Step 6 ──→ rxcui, adverse_event        (RxNorm + OpenFDA)
+        ├─ Step 7 ──→ literature_weight           (Europe PMC)
+        ├─ Step 8 ──→ test_literature_weight      (Europe PMC)
+        └─ Step 9 ──→ trial_count                (ClinicalTrials.gov)
+                │
+                ▼
+   build_unified_medical_kg(df)
+                │
+                ▼
+   triage_knowledge_graph.pkl   ──→   triage_knowledge_graph.html
+                │                              (visualize_kg.py)
+                ▼
+   kg_fact_checker.py  /  triage_extraction_pipeline.py
+```
+
+---
+
 ## File Reference
 
 ### `guideline_rules.json`
@@ -119,8 +229,8 @@ Exchanges Infoway OAuth2 client credentials for a bearer access token using the 
 **`get_infoway_snomed_concept(term, access_token) → (display, code)`**
 Queries the Canada Health Infoway FHIR `ValueSet/$expand` endpoint for a SNOMED CT CA concept matching `term`. Returns `(display, code)` or `(term, None)` on failure.
 
-**`get_open_medical_concept(term) → (label, short_form)`**
-Queries the EMBL-EBI OLS4 API (no key required) across the HP, MONDO, and EFO ontologies for an open concept matching `term`. Returns `(label, short_form)` or `(term, None)` on failure.
+**`get_open_medical_concept(term) → (label, short_form, synonyms)`**
+Queries the EMBL-EBI OLS4 API (no key required) across the HP, MONDO, and EFO ontologies for an open concept matching `term`. Returns `(label, short_form, synonyms_list)` where `synonyms_list` is a (possibly empty) list of alternative clinical terms extracted from the OLS4 `synonym` field. Returns `(term, None, [])` on failure.
 
 **`get_rxnorm_rxcui(term) → rxcui | None`**
 Queries the free NLM RxNorm REST API (`rxnav.nlm.nih.gov`) for the RxCUI identifier of a drug name. Returns the RxCUI string or `None` if not found.
