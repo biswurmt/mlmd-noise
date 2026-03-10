@@ -2,30 +2,39 @@ import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import ChatInput from "./components/ChatInput";
 import GraphCanvas from "./components/GraphCanvas";
-import { addTest, getGraph, type GraphEdge, type GraphNode } from "./services/api";
 import { NODE_COLORS } from "./constants/nodeColors";
+import { addTest, getGraph, getTests, type GraphEdge, type GraphNode, type TestNode } from "./services/api";
 
-// ── Component ─────────────────────────────────────────────────────────────────
+const DEFAULT_PATHWAY = "Abdominal Ultrasound";
 
 export default function App() {
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
+  const [nodes, setNodes]           = useState<GraphNode[]>([]);
+  const [edges, setEdges]           = useState<GraphEdge[]>([]);
+  const [allTestNodes, setAllTestNodes] = useState<TestNode[]>([]);
   const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]       = useState(false);
   const [graphLoading, setGraphLoading] = useState(true);
+  const [selectedTest, setSelectedTest] = useState<string | null>(`Test: ${DEFAULT_PATHWAY}`);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Load graph on mount ────────────────────────────────────────────────────
+  // ── Load sidebar test list on mount ───────────────────────────────────────
   useEffect(() => {
-    getGraph()
+    getTests().then(setAllTestNodes).catch(console.error);
+  }, []);
+
+  // ── Fetch graph whenever the selected pathway changes ─────────────────────
+  useEffect(() => {
+    setGraphLoading(true);
+    const pathway = selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : undefined;
+    getGraph(pathway)
       .then((data) => {
         setNodes(data.nodes);
         setEdges(data.edges);
       })
       .catch(console.error)
       .finally(() => setGraphLoading(false));
-  }, []);
+  }, [selectedTest]);
 
   // ── Toast helper ───────────────────────────────────────────────────────────
   function showToast(type: "success" | "error", text: string) {
@@ -40,28 +49,26 @@ export default function App() {
     try {
       const res = await addTest(diagnosticTest);
 
-      // Merge new nodes (deduplicate by id)
-      setNodes((prev) => {
-        const existingIds = new Set(prev.map((n) => n.id));
-        const incoming = res.new_nodes.filter((n) => !existingIds.has(n.id));
-        return [...prev, ...incoming];
-      });
-
-      // Merge new edges — use relationship as tie-breaker so parallel edges
-      // with different types are preserved.  Cast source/target to string
-      // because force-graph mutates them into node objects after first render.
-      setEdges((prev) => {
-        const existingKeys = new Set(
-          prev.map((e) => `${String(e.source)}||${String(e.target)}||${e.relationship ?? ""}`)
-        );
-        const incoming = res.new_edges.filter(
-          (e) => !existingKeys.has(`${e.source}||${e.target}||${e.relationship ?? ""}`)
-        );
-        return [...prev, ...incoming];
-      });
-
-      // Highlight new nodes
+      // Mark new nodes for highlight animation before the re-fetch lands
       setNewNodeIds(new Set(res.new_nodes.map((n) => n.id)));
+
+      // Add any new test nodes to the sidebar list
+      const newTests = res.new_nodes
+        .filter((n) => (n.node_type ?? n.type) === "Diagnostic_Test")
+        .map((n) => ({ id: n.id, label: n.id.replace(/^[^:]+:\s*/, "") }));
+      if (newTests.length > 0) {
+        setAllTestNodes((prev) => {
+          const existingIds = new Set(prev.map((t) => t.id));
+          const incoming = newTests.filter((t) => !existingIds.has(t.id));
+          return [...prev, ...incoming].sort((a, b) => a.label.localeCompare(b.label));
+        });
+      }
+
+      // Auto-select the new test — triggers the pathway-fetch useEffect
+      const newTestNode = res.new_nodes.find(
+        (n) => (n.node_type ?? n.type) === "Diagnostic_Test"
+      );
+      if (newTestNode) setSelectedTest(newTestNode.id);
 
       showToast(
         "success",
@@ -75,7 +82,7 @@ export default function App() {
     }
   }
 
-  // ── Node-type counts for sidebar ───────────────────────────────────────────
+  // ── Node-type counts for legend ────────────────────────────────────────────
   const typeCounts = nodes.reduce<Record<string, number>>((acc, n) => {
     const t = (n.node_type as string | undefined) ?? "Unknown";
     acc[t] = (acc[t] ?? 0) + 1;
@@ -105,6 +112,34 @@ export default function App() {
       <div className="body">
         {/* Sidebar */}
         <aside className="sidebar">
+
+          {/* ── Pathway picker ── */}
+          {allTestNodes.length > 0 && (
+            <>
+              <p className="sidebar-title">Pathways</p>
+              <div className="pathway-list">
+                <button
+                  className={`pathway-btn${selectedTest === null ? " active" : ""}`}
+                  onClick={() => setSelectedTest(null)}
+                >
+                  All Pathways
+                  <span className="pathway-count">{allTestNodes.length}</span>
+                </button>
+                {allTestNodes.map(({ id, label }) => (
+                  <button
+                    key={id}
+                    className={`pathway-btn${selectedTest === id ? " active" : ""}`}
+                    onClick={() => setSelectedTest(selectedTest === id ? null : id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="sidebar-divider" />
+            </>
+          )}
+
+          {/* ── Node type legend ── */}
           <p className="sidebar-title">Node Types</p>
           <ul className="legend">
             {Object.entries(NODE_COLORS).map(([type, color]) => (
@@ -118,9 +153,10 @@ export default function App() {
 
           <div className="sidebar-divider" />
 
+          {/* ── Pipeline info ── */}
           <p className="sidebar-title">Pipeline</p>
           <ol className="pipeline-steps">
-            <li>Claude extracts 8–15 triage rules</li>
+            <li>Gemini extracts 8–15 triage rules</li>
             <li>Rules appended to JSON store</li>
             <li>Multi-ontology grounding (EBI, Infoway)</li>
             <li>NetworkX graph rebuilt</li>
@@ -130,19 +166,27 @@ export default function App() {
 
         {/* Graph canvas */}
         <main className="canvas-area">
-          {graphLoading ? (
-            <div className="canvas-placeholder">
-              <div className="spinner" />
-              <p>Loading knowledge graph…</p>
-            </div>
-          ) : nodes.length === 0 ? (
+          {nodes.length === 0 && !graphLoading ? (
             <div className="canvas-placeholder">
               <p className="placeholder-hint">
                 No graph data yet. Enter a diagnostic test below to generate the first pathway.
               </p>
             </div>
           ) : (
-            <GraphCanvas nodes={nodes} edges={edges} newNodeIds={newNodeIds} />
+            <div style={{ position: "relative", width: "100%", height: "100%" }}>
+              {nodes.length > 0 && (
+                <GraphCanvas
+                  nodes={nodes}
+                  edges={edges}
+                  newNodeIds={newNodeIds}
+                />
+              )}
+              {graphLoading && (
+                <div className="canvas-loading-overlay">
+                  <div className="spinner" />
+                </div>
+              )}
+            </div>
           )}
         </main>
       </div>

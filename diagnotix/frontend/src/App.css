@@ -155,6 +155,58 @@ html, body, #root {
   gap: 8px;
 }
 
+/* ─── Pathway picker ─────────────────────────────────────────────────────────── */
+.pathway-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.pathway-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11.5px;
+  padding: 5px 8px;
+  text-align: left;
+  transition: background var(--transition), color var(--transition),
+              border-color var(--transition);
+  width: 100%;
+}
+
+.pathway-btn:hover {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.pathway-btn.active {
+  background: var(--blue-dim);
+  border-color: var(--blue);
+  color: var(--blue-hover);
+  font-weight: 600;
+}
+
+.pathway-count {
+  font-size: 10px;
+  background: var(--border);
+  border-radius: 100px;
+  padding: 1px 6px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.pathway-btn.active .pathway-count {
+  background: rgba(56, 139, 253, 0.25);
+  color: var(--blue-hover);
+}
+
 .sidebar-title {
   font-size: 10px;
   font-weight: 700;
@@ -240,6 +292,17 @@ html, body, #root {
   padding: 40px;
 }
 
+.canvas-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 17, 23, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 10;
+}
+
 .placeholder-hint {
   max-width: 360px;
   line-height: 1.65;
@@ -257,6 +320,88 @@ html, body, #root {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ─── Graph node tooltip ──────────────────────────────────────────────────────── */
+.graph-tooltip-wrapper {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  max-width: 260px;
+}
+
+.graph-tooltip {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  color: var(--text-primary);
+}
+
+.gt-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+  color: var(--text-primary);
+}
+
+.gt-type {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.gt-section {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.gt-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.gt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.gt-row code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  color: var(--blue-hover);
+  background: var(--blue-dim);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.gt-synonyms {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.gt-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--blue-hover);
+  text-decoration: none;
+  pointer-events: auto;
+}
+
+.gt-link:hover {
+  text-decoration: underline;
 }
 
 /* ─── Chat bar (fixed bottom) ────────────────────────────────────────────────── */

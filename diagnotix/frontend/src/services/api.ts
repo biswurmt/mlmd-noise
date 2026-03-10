@@ -52,9 +52,24 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
 
-/** Load the full graph from the serialised PKL. */
-export function getGraph(): Promise<GraphData> {
-  return apiFetch<GraphData>("/api/graph");
+export interface TestNode {
+  id: string;
+  label: string;
+}
+
+/** Return the list of all Diagnostic_Test nodes (for the sidebar picker). */
+export function getTests(): Promise<TestNode[]> {
+  return apiFetch<TestNode[]>("/api/tests");
+}
+
+/**
+ * Load graph data from the backend.
+ * If *pathway* is provided, the server returns only that pathway's subgraph.
+ * Omit (or pass undefined) to receive the full graph.
+ */
+export function getGraph(pathway?: string): Promise<GraphData> {
+  const qs = pathway ? `?pathway=${encodeURIComponent(pathway)}` : "";
+  return apiFetch<GraphData>(`/api/graph${qs}`);
 }
 
 /** Run the LLM pipeline for a diagnostic test; returns only the new cluster. */

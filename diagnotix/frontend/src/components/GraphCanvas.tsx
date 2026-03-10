@@ -4,35 +4,34 @@ import type { GraphEdge, GraphNode } from "../services/api";
 import { DEFAULT_NODE_COLOR, NODE_COLORS } from "../constants/nodeColors";
 
 const LINK_COLORS: Record<string, string> = {
-  INDICATES_CONDITION:      "#58a6ff",
-  REQUIRES_TEST:            "#e8a838",
-  DIRECTLY_INDICATES_TEST:  "#3fb950",
+  INDICATES_CONDITION:     "#58a6ff",
+  REQUIRES_TEST:           "#e8a838",
+  DIRECTLY_INDICATES_TEST: "#3fb950",
 };
-const DEFAULT_LINK_COLOR = "#6e7681";
-
+const DEFAULT_LINK_COLOR    = "#6e7681";
 const NEW_HIGHLIGHT_COLOR   = "#ffffff";
 const HIGHLIGHT_DURATION_MS = 5_000;
 
-// ── Internal graph types ──────────────────────────────────────────────────────
-// react-force-graph mutates link objects during simulation, replacing the
-// string "source"/"target" IDs with actual node-object references.
+// ── Internal types ────────────────────────────────────────────────────────────
+// react-force-graph mutates links: source/target go from string IDs → node refs.
 
 interface FGNode extends Record<string, unknown> {
-  id:              string;
-  node_type?:      string;
-  type?:           string;
-  synonyms?:       string[];
-  ebi_open_code?:  string;
-  snomed_ca_code?: string;
-  icd10_code?:     string;
-  loinc_code?:     string;
-  rxcui?:          string;
-  x?:              number;
-  y?:              number;
+  id:               string;
+  node_type?:       string;
+  type?:            string;
+  synonyms?:        string[];
+  ebi_open_code?:   string;
+  snomed_ca_code?:  string;
+  icd10_code?:      string;
+  loinc_code?:      string;
+  rxcui?:           string;
+  guideline_source?: string;
+  guideline_url?:   string;
+  x?: number;
+  y?: number;
 }
 
 interface FGLink extends Record<string, unknown> {
-  // After simulation starts these become node-object references.
   source:                  string | FGNode;
   target:                  string | FGNode;
   relationship?:           string;
@@ -49,9 +48,9 @@ interface Props {
   newNodeIds: Set<string>;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Pure helpers ──────────────────────────────────────────────────────────────
 
-function nodeId(n: string | FGNode): string {
+function getId(n: string | FGNode): string {
   return typeof n === "string" ? n : n.id;
 }
 
@@ -67,36 +66,75 @@ function linkColor(link: FGLink): string {
   return LINK_COLORS[link.relationship ?? ""] ?? DEFAULT_LINK_COLOR;
 }
 
-function nodeTooltip(node: FGNode): string {
-  const lines: string[] = [`<b>${node.id}</b>`];
-  const typ = node.node_type ?? node.type;
-  if (typ) lines.push(`Type: ${typ}`);
-  if (node.ebi_open_code)  lines.push(`HP/MONDO: ${node.ebi_open_code}`);
-  if (node.snomed_ca_code) lines.push(`SNOMED-CT: ${node.snomed_ca_code}`);
-  if (node.icd10_code)     lines.push(`ICD-10: ${node.icd10_code}`);
-  if (node.loinc_code)     lines.push(`LOINC: ${node.loinc_code}`);
-  if (node.rxcui)          lines.push(`RxCUI: ${node.rxcui}`);
-  const syns = node.synonyms;
-  if (Array.isArray(syns) && syns.length > 0) {
-    lines.push(`Synonyms: ${syns.join(", ")}`);
-  }
-  return lines.join("<br>");
-}
-
 function linkTooltip(link: FGLink): string {
   const lines: string[] = [];
   if (link.relationship)     lines.push(`<b>${link.relationship}</b>`);
   if (link.guideline_source) lines.push(`Guideline: [${link.guideline_source}]`);
   if (link.literature_weight != null)
-    lines.push(`Literature evidence: ${Number(link.literature_weight).toLocaleString()} papers`);
+    lines.push(`Literature: ${Number(link.literature_weight).toLocaleString()} papers`);
   if (link.test_literature_weight != null)
     lines.push(`Test literature: ${Number(link.test_literature_weight).toLocaleString()} papers`);
   if (link.trial_count != null)
     lines.push(`Clinical trials: ${link.trial_count}`);
-  const src = nodeId(link.source);
-  const tgt = nodeId(link.target);
-  lines.push(`<span style="opacity:0.6;font-size:10px">${src} → ${tgt}</span>`);
+  lines.push(
+    `<span style="opacity:0.6;font-size:10px">${getId(link.source)} → ${getId(link.target)}</span>`
+  );
   return lines.join("<br>") || "Edge";
+}
+
+// ── Tooltip content ───────────────────────────────────────────────────────────
+
+function NodeTooltip({ node }: { node: FGNode }) {
+  const typ      = node.node_type ?? node.type;
+  const label    = String(node.id).replace(/^[^:]+:\s*/, "");
+  const syns     = Array.isArray(node.synonyms) ? node.synonyms as string[] : [];
+
+  return (
+    <div className="graph-tooltip">
+      <div className="gt-title">{label}</div>
+      {typ && <div className="gt-type">{typ.replace(/_/g, " ")}</div>}
+
+      {/* ── Ontology codes ── */}
+      {(node.ebi_open_code || node.snomed_ca_code || node.icd10_code ||
+        node.loinc_code || node.rxcui) && (
+        <div className="gt-section">
+          {node.ebi_open_code  && <div className="gt-row"><span>HP/MONDO</span><code>{node.ebi_open_code}</code></div>}
+          {node.snomed_ca_code && <div className="gt-row"><span>SNOMED-CT</span><code>{node.snomed_ca_code}</code></div>}
+          {node.icd10_code     && <div className="gt-row"><span>ICD-10</span><code>{node.icd10_code}</code></div>}
+          {node.loinc_code     && <div className="gt-row"><span>LOINC</span><code>{node.loinc_code}</code></div>}
+          {node.rxcui          && <div className="gt-row"><span>RxCUI</span><code>{node.rxcui}</code></div>}
+        </div>
+      )}
+
+      {/* ── Synonyms ── */}
+      {syns.length > 0 && (
+        <div className="gt-section">
+          <div className="gt-label">Also known as</div>
+          <div className="gt-synonyms">{syns.join(" · ")}</div>
+        </div>
+      )}
+
+      {/* ── Supporting documentation (Test nodes) ── */}
+      {node.guideline_source && (
+        <div className="gt-section">
+          <div className="gt-label">Guideline</div>
+          <div className="gt-row">
+            <span>{node.guideline_source}</span>
+          </div>
+          {node.guideline_url && (
+            <a
+              className="gt-link"
+              href={node.guideline_url as string}
+              target="_blank"
+              rel="noreferrer"
+            >
+              View source ↗
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -104,10 +142,12 @@ function linkTooltip(link: FGLink): string {
 export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef        = useRef<ForceGraphMethods<FGNode, FGLink>>();
-  const [dims, setDims]           = useState({ width: 800, height: 600 });
+  const [dims, setDims]               = useState({ width: 800, height: 600 });
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+  const [hoveredNode, setHoveredNode]   = useState<FGNode | null>(null);
+  const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
 
-  // Responsive container size
+  // ── Responsive container ────────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -119,7 +159,7 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // Highlight new nodes, then fade after timeout
+  // ── New-node highlight ──────────────────────────────────────────────────────
   useEffect(() => {
     if (newNodeIds.size === 0) return;
     setHighlightIds(new Set(newNodeIds));
@@ -127,67 +167,107 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
     return () => clearTimeout(t);
   }, [newNodeIds]);
 
-  // Configure physics forces whenever the simulation (re)starts
+  // ── Graph data ──────────────────────────────────────────────────────────────
+  // react-force-graph mutates x/y/vx/vy onto node objects in-place and mutates
+  // link.source/target from strings into node references.  Passing the same
+  // object references after a pathway change means the library sees "known"
+  // nodes, skips re-positioning them, and renders nothing useful.
+  //
+  // Fix: spread FRESH copies of every node AND link object so the library
+  // always treats incoming data as a clean slate.
+  const graphData = useMemo(() => ({
+    nodes: nodes.map(n => ({ ...n })) as FGNode[],
+    links: (edges as unknown as FGLink[]).map(link => ({
+      ...link,
+      source: getId(link.source),
+      target: getId(link.target),
+    })),
+  }), [nodes, edges]);
+
+  // ── Reheat simulation on data change ───────────────────────────────────────
+  // graphData already contains fresh object references (nodes spread above), so
+  // ForceGraph2D picks up the new nodes via its prop.  Calling d3ReheatSimulation
+  // ensures the engine actually runs from scratch instead of staying frozen.
+  useEffect(() => {
+    fgRef.current?.d3ReheatSimulation();
+  }, [graphData]);
+
+  // ── Physics ─────────────────────────────────────────────────────────────────
   const handleEngineStart = useCallback(() => {
     const fg = fgRef.current;
     if (!fg) return;
-    // Strong repulsion so labels have breathing room
-    (fg.d3Force("charge") as any)?.strength(-350);
-    // Moderate link distance
-    (fg.d3Force("link") as any)?.distance(80).iterations(3);
-    // Weak centering so the graph can spread
+    (fg.d3Force("charge") as any)?.strength(-500);
+    (fg.d3Force("link")   as any)?.distance(120).iterations(3);
     (fg.d3Force("center") as any)?.strength(0.05);
   }, []);
 
-  // Fit view after the simulation settles
+  // Re-fit when simulation naturally stops
   const handleEngineStop = useCallback(() => {
-    fgRef.current?.zoomToFit(400, 60);
+    fgRef.current?.zoomToFit(400, 80);
   }, []);
 
-  // Custom node painter
+  // ── Camera: zoom to fit whenever the displayed cluster changes ─────────────
+  useEffect(() => {
+    const t = setTimeout(() => {
+      fgRef.current?.zoomToFit(800, 50);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [graphData]);
+
+  // ── Hover tooltip ───────────────────────────────────────────────────────────
+  const handleNodeHover = useCallback((node: FGNode | null) => {
+    setHoveredNode(node ?? null);
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTooltipPos({ x: e.clientX - rect.left + 16, y: e.clientY - rect.top + 16 });
+  }, []);
+
+  // ── Node painter ─────────────────────────────────────────────────────────────
   const paintNode = useCallback(
     (node: FGNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      const isNew   = highlightIds.has(node.id);
-      const typ     = node.node_type ?? node.type ?? "";
-      const fill    = isNew ? NEW_HIGHLIGHT_COLOR : (NODE_COLORS[typ] ?? DEFAULT_NODE_COLOR);
-      const radius  = isNew ? 9 : 6;
-      const nx      = node.x ?? 0;
-      const ny      = node.y ?? 0;
+      const isNew  = highlightIds.has(node.id);
+      const isHovered = hoveredNode?.id === node.id;
+      const typ    = node.node_type ?? node.type ?? "";
+      const fill   = isNew ? NEW_HIGHLIGHT_COLOR : (NODE_COLORS[typ] ?? DEFAULT_NODE_COLOR);
+      const radius = isNew ? 9 : isHovered ? 8 : 6;
+      const nx     = node.x ?? 0;
+      const ny     = node.y ?? 0;
 
-      // Glow ring for newly added nodes
-      if (isNew) {
+      // ── 1. Glow ring (new nodes or hovered) ────────────────────────────────
+      if (isNew || isHovered) {
         ctx.beginPath();
         ctx.arc(nx, ny, radius + 5, 0, 2 * Math.PI);
-        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.fillStyle = isNew ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.08)";
         ctx.fill();
       }
 
-      // Node circle
+      // ── 2. Node circle ──────────────────────────────────────────────────────
       ctx.beginPath();
       ctx.arc(nx, ny, radius, 0, 2 * Math.PI);
       ctx.fillStyle = fill;
       ctx.fill();
-
-      // Subtle border
-      ctx.strokeStyle = isNew ? "#ffffff" : "rgba(255,255,255,0.18)";
-      ctx.lineWidth   = isNew ? 1.5 : 0.8;
+      ctx.strokeStyle = isNew || isHovered ? "#ffffff" : "rgba(255,255,255,0.25)";
+      ctx.lineWidth   = isNew || isHovered ? 1.5 : 0.8 / globalScale;
       ctx.stroke();
 
-      // Label — visible only when zoomed in enough
+      // ── 3. Text label below node ────────────────────────────────────────────
       const fontSize = Math.max(2.5, 11 / globalScale);
-      if (fontSize > 2.5) {
-        const label = String(node.id).replace(/^[^:]+:\s*/, ""); // strip prefix
-        ctx.font          = `${fontSize}px Inter, system-ui, sans-serif`;
-        ctx.textAlign     = "center";
-        ctx.textBaseline  = "top";
-        ctx.fillStyle     = "rgba(230,237,243,0.85)";
-        ctx.fillText(label, nx, ny + radius + 2);
+      if (fontSize <= 30) {
+        const label = String(node.id).replace(/^[^:]+:\s*/, "");
+        ctx.font         = `${fontSize}px Inter, system-ui, sans-serif`;
+        ctx.textAlign    = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle    = "rgba(230,237,243,0.90)";
+        ctx.fillText(label, nx, ny + radius + 2 / globalScale);
       }
     },
-    [highlightIds]
+    [highlightIds, hoveredNode]
   );
 
-  // Hit-test area matches the painted radius
+  // Hit-test area
   const paintPointerArea = useCallback(
     (node: FGNode, color: string, ctx: CanvasRenderingContext2D) => {
       const radius = highlightIds.has(node.id) ? 9 : 6;
@@ -199,26 +279,72 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
     [highlightIds]
   );
 
-  // Memoize so force-graph's internal differ only triggers on real data changes
-  const graphData = useMemo(
-    () => ({ nodes: nodes as FGNode[], links: edges as unknown as FGLink[] }),
-    [nodes, edges]
+  // ── Edge label painter ───────────────────────────────────────────────────────
+  // Mode "after" — the default line + arrow is drawn first, then this overlay.
+  // At paint time the library has already mutated link.source/target into node
+  // object refs, so src.x / tgt.x are available.
+  const paintLink = useCallback(
+    (
+      link:        FGLink,
+      ctx:         CanvasRenderingContext2D,
+      globalScale: number
+    ) => {
+      const label = link.relationship;
+      if (!label) return;
+
+      const src = link.source as FGNode;
+      const tgt = link.target as FGNode;
+      if (src?.x == null || tgt?.x == null) return;
+
+      // Keep label a constant ~9 screen-pixels so it's always readable
+      const fontSize = 9 / globalScale;
+      if (fontSize > 50) return; // skip at extreme zoom-out
+
+      const mx  = (src.x + tgt.x) / 2;
+      const my  = (src.y + tgt.y) / 2;
+      let angle = Math.atan2(tgt.y! - src.y!, tgt.x - src.x);
+      // Prevent upside-down text
+      if (angle > Math.PI / 2 || angle < -Math.PI / 2) angle += Math.PI;
+
+      ctx.save();
+      ctx.translate(mx, my);
+      ctx.rotate(angle);
+
+      ctx.font         = `${fontSize}px Inter, system-ui, sans-serif`;
+      ctx.textAlign    = "center";
+      ctx.textBaseline = "middle";
+
+      const tw  = ctx.measureText(label).width;
+      const pad = fontSize * 0.35;
+      ctx.fillStyle = "rgba(13,17,23,0.82)";
+      ctx.fillRect(-tw / 2 - pad, -fontSize / 2 - pad * 0.6, tw + pad * 2, fontSize + pad * 1.2);
+
+      ctx.fillStyle = "rgba(230,237,243,0.92)";
+      ctx.fillText(label, 0, 0);
+
+      ctx.restore();
+    },
+    []
   );
 
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%", overflow: "hidden" }}>
+    <div
+      ref={containerRef}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}
+      onMouseMove={handleMouseMove}
+    >
       <ForceGraph2D
         ref={fgRef}
         width={dims.width}
         height={dims.height}
         graphData={graphData}
-        // ── Node config ──────────────────────────────────────────────────────
+        // ── Nodes ──────────────────────────────────────────────────────────
         nodeId="id"
         nodeCanvasObject={paintNode}
         nodeCanvasObjectMode={() => "replace"}
         nodePointerAreaPaint={paintPointerArea}
-        nodeLabel={nodeTooltip}
-        // ── Link config ──────────────────────────────────────────────────────
+        onNodeHover={handleNodeHover}
+        // ── Links ──────────────────────────────────────────────────────────
         linkSource="source"
         linkTarget="target"
         linkColor={linkColor}
@@ -226,16 +352,28 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
         linkDirectionalArrowLength={6}
         linkDirectionalArrowRelPos={1}
         linkDirectionalArrowColor={linkColor}
+        linkCanvasObject={paintLink}
+        linkCanvasObjectMode={() => "after"}
         linkLabel={linkTooltip}
         linkHoverPrecision={4}
-        // ── Scene ────────────────────────────────────────────────────────────
+        // ── Scene ──────────────────────────────────────────────────────────
         backgroundColor="#0d1117"
-        // ── Simulation ──────────────────────────────────────────────────────
+        // ── Simulation ────────────────────────────────────────────────────
         warmupTicks={80}
         cooldownTicks={200}
         onEngineStart={handleEngineStart}
         onEngineStop={handleEngineStop}
       />
+
+      {/* ── Hover tooltip overlay ─────────────────────────────────────────── */}
+      {hoveredNode && (
+        <div
+          className="graph-tooltip-wrapper"
+          style={{ left: tooltipPos.x, top: tooltipPos.y }}
+        >
+          <NodeTooltip node={hoveredNode} />
+        </div>
+      )}
     </div>
   );
 }
