@@ -2,7 +2,7 @@
 ================
 Orchestrates the Diagnotix add-test pipeline:
   1. Snapshot the current graph node IDs (for diff computation).
-  2. Call Gemini to extract triage rules for the requested diagnostic test.
+  2. Call Azure OpenAI to extract triage rules for the requested diagnostic test.
   3. Validate and append the new rules to guideline_rules.json.
   4. Invoke generate_knowledge_graph() from build_kg.py to rebuild the PKL.
   5. Compute the diff (new nodes / new edges) against the pre-rebuild snapshot.
@@ -16,7 +16,8 @@ import os
 import re
 import sys
 
-import google.generativeai as genai
+from azure.identity import AzureCliCredential, get_bearer_token_provider
+from openai import AzureOpenAI
 
 from backend.models.schemas import AddTestResponse
 from backend.services.graph_service import get_existing_node_ids, load_graph_json
@@ -35,17 +36,33 @@ from build_kg import generate_knowledge_graph  # noqa: E402
 _RULES_FILE = os.path.join(_KG_DIR, "guideline_rules.json")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Gemini client — configured once at import time.
-# Add GEMINI_API_KEY to knowledge-graphs/.env (it is loaded by build_kg).
+# Azure OpenAI client — uses AzureCliCredential (no API key required).
+# Set ENDPOINT_URL and DEPLOYMENT_NAME in knowledge-graphs/.env.
 # ─────────────────────────────────────────────────────────────────────────────
-_api_key = os.environ.get("GEMINI_API_KEY")
-if not _api_key:
+_endpoint = os.environ.get("ENDPOINT_URL")
+_deployment = os.environ.get("DEPLOYMENT_NAME")
+
+if not _endpoint:
     raise ValueError(
-        "GEMINI_API_KEY not found in the environment. "
+        "ENDPOINT_URL not found in the environment. "
+        "Add it to knowledge-graphs/.env and restart the server."
+    )
+if not _deployment:
+    raise ValueError(
+        "DEPLOYMENT_NAME not found in the environment. "
         "Add it to knowledge-graphs/.env and restart the server."
     )
 
-genai.configure(api_key=_api_key)
+_credential = AzureCliCredential()
+_token_provider = get_bearer_token_provider(
+    _credential, "https://cognitiveservices.azure.com/.default"
+)
+
+_CLIENT = AzureOpenAI(
+    azure_endpoint=_endpoint,
+    azure_ad_token_provider=_token_provider,
+    api_version="2024-02-01",
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -84,11 +101,6 @@ Generate 8–15 rules spanning at least 3 distinct conditions. \
 Use real clinical guideline sources. Be clinically accurate.\
 """
 
-_MODEL = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
-    system_instruction=SYSTEM_PROMPT,
-)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Synchronous worker (runs in a thread-pool via asyncio.to_thread)
@@ -106,32 +118,43 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
         f'IMPORTANT: the "test" field must be exactly "{diagnostic_test}" for every rule.'
     )
 
-    response = _MODEL.generate_content(
-        user_message,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-        ),
+    response = _CLIENT.chat.completions.create(
+        model=_deployment,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+        response_format={"type": "json_object"},
     )
 
-    text = response.text
+    text = response.choices[0].message.content
     if not text:
-        raise ValueError("Gemini returned no text content.")
+        raise ValueError("Azure OpenAI returned no text content.")
 
     # ── 3. Parse JSON ────────────────────────────────────────────────────────
     try:
-        new_rules = json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         match = re.search(r"\[.*\]", text, re.DOTALL)
         if match:
-            new_rules = json.loads(match.group())
+            parsed = json.loads(match.group())
         else:
             raise ValueError(
-                f"Gemini response could not be parsed as JSON. "
+                f"Azure OpenAI response could not be parsed as JSON. "
                 f"First 300 chars: {text[:300]}"
             )
 
-    if not isinstance(new_rules, list):
-        raise ValueError("Gemini response was not a JSON array.")
+    # json_object mode may wrap the array under a key (e.g. {"rules": [...]})
+    if isinstance(parsed, dict):
+        new_rules = next(
+            (v for v in parsed.values() if isinstance(v, list)), None
+        )
+        if new_rules is None:
+            raise ValueError("Azure OpenAI response JSON object contained no array.")
+    elif isinstance(parsed, list):
+        new_rules = parsed
+    else:
+        raise ValueError("Azure OpenAI response was not a JSON array or object.")
 
     # ── 4. Validate rules ────────────────────────────────────────────────────
     valid_rules = []
@@ -147,7 +170,7 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
 
     if not valid_rules:
         raise ValueError(
-            f"Gemini generated {len(new_rules)} raw rules but none passed schema validation."
+            f"Azure OpenAI generated {len(new_rules)} raw rules but none passed schema validation."
         )
 
     # ── 5. Append to guideline_rules.json ────────────────────────────────────
