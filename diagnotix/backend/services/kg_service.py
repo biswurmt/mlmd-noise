@@ -61,7 +61,7 @@ _token_provider = get_bearer_token_provider(
 _CLIENT = AzureOpenAI(
     azure_endpoint=_endpoint,
     azure_ad_token_provider=_token_provider,
-    api_version="2024-02-01",
+    api_version="2025-01-01-preview",
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
-        response_format={"type": "json_object"},
+        # response_format={"type": "json_object"}, # commented out because the older model version
     )
 
     text = response.choices[0].message.content
