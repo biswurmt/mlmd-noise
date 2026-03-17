@@ -182,31 +182,86 @@ def get_open_medical_concept(term):
         return term, None, []
 
 
-def get_umls_concept(term, sabs, api_key):
-    """Query the UMLS REST API for any vocabulary supported by the sabs parameter.
+# def get_umls_concept(term, sabs, api_key):
+#     """Query the UMLS REST API for any vocabulary supported by the sabs parameter.
 
-    Examples:
-        sabs="LNC"      → LOINC codes for diagnostic tests
-        sabs="ICD10CM"  → ICD-10-CM codes for conditions
-    Returns (canonical_name, code) or (term, None) on failure.
+#     Examples:
+#         sabs="LNC"      → LOINC codes for diagnostic tests
+#         sabs="ICD10CM"  → ICD-10-CM codes for conditions
+#     Returns (canonical_name, code) or (term, None) on failure.
+#     """
+#     base_uri = "https://uts-ws.nlm.nih.gov/rest/search/current"
+#     params = {
+#         "string": term,
+#         "sabs": sabs,
+#         "returnIdType": "code",
+#         "apiKey": api_key,
+#     }
+#     try:
+#         response = requests.get(base_uri, params=params)
+#         response.raise_for_status()
+#         results = response.json().get("result", {}).get("results", [])
+#         if results:
+#             best = results[0]
+#             return best["name"], best["ui"]
+#         return term, None
+#     except Exception as e:
+#         print(f"  UMLS ({sabs}) error for '{term}': {e}")
+#         return term, None
+
+def get_umls_concept(term, sabs, api_key):
     """
-    base_uri = "https://uts-ws.nlm.nih.gov/rest/search/current"
-    params = {
+    A 2-step UMLS lookup that completely isolates the text search from 
+    the vocabulary filter to avoid NLM 500 Server Errors.
+    """
+    search_url = "https://uts-ws.nlm.nih.gov/rest/search/current"
+    
+    # STEP 1: Get the CUI using a specific search type
+    search_params = {
         "string": term,
-        "sabs": sabs,
-        "returnIdType": "code",
-        "apiKey": api_key,
+        "searchType": "exact", # Forces a direct match, bypassing their complex text parser
+        "apiKey": api_key
     }
+    
     try:
-        response = requests.get(base_uri, params=params)
-        response.raise_for_status()
-        results = response.json().get("result", {}).get("results", [])
-        if results:
-            best = results[0]
-            return best["name"], best["ui"]
-        return term, None
-    except Exception as e:
-        print(f"  UMLS ({sabs}) error for '{term}': {e}")
+        search_resp = requests.get(search_url, params=search_params)
+        search_resp.raise_for_status()
+        search_results = search_resp.json().get("result", {}).get("results", [])
+        
+        if not search_results:
+            return term, None
+            
+        cui = search_results[0]["ui"]
+        best_name = search_results[0]["name"]
+        
+        # STEP 2: Now that we safely have the CUI, ask for the specific vocabulary code
+        atoms_url = f"https://uts-ws.nlm.nih.gov/rest/content/current/CUI/{cui}/atoms"
+        atoms_params = {
+            "sabs": sabs, # Filter by ICD10CM here instead
+            "apiKey": api_key
+        }
+        
+        atoms_resp = requests.get(atoms_url, params=atoms_params)
+        atoms_resp.raise_for_status()
+        atoms_results = atoms_resp.json().get("result", [])
+        
+        if atoms_results:
+            # Grab the source code (e.g., the exact ICD10CM code)
+            source_code = atoms_results[0]["ui"]
+            return best_name, source_code
+            
+        return best_name, None
+
+    except requests.exceptions.RequestException as e:
+        print(f"  UMLS API error for '{term}': {e}")
+        
+        # Check if the error contains a response from the server
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"  --- Detailed Server Response ---")
+            # Print the raw text sent back by the server
+            print(f"  {e.response.text}")
+            print(f"  --------------------------------")
+            
         return term, None
 
 
