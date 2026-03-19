@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import ChatInput from "./components/ChatInput";
 import GraphCanvas from "./components/GraphCanvas";
@@ -7,9 +7,16 @@ import { addTest, getGraph, getTests, type GraphEdge, type GraphNode, type TestN
 
 const DEFAULT_PATHWAY = "Abdominal Ultrasound";
 
+// Node types visible on initial load. All others start hidden.
+const DEFAULT_VISIBLE_TYPES = new Set(["Symptom", "Condition", "Diagnostic_Test"]);
+const INITIAL_HIDDEN_TYPES  = new Set(
+  Object.keys(NODE_COLORS).filter((t) => !DEFAULT_VISIBLE_TYPES.has(t))
+);
+
 export default function App() {
   const [nodes, setNodes]           = useState<GraphNode[]>([]);
   const [edges, setEdges]           = useState<GraphEdge[]>([]);
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(INITIAL_HIDDEN_TYPES);
   const [allTestNodes, setAllTestNodes] = useState<TestNode[]>([]);
   const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
   const [loading, setLoading]       = useState(false);
@@ -82,7 +89,37 @@ export default function App() {
     }
   }
 
-  // ── Node-type counts for legend ────────────────────────────────────────────
+  // ── Toggle a node type's visibility ───────────────────────────────────────
+  function toggleType(type: string) {
+    setHiddenTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }
+
+  // ── Filtered graph data ────────────────────────────────────────────────────
+  const visibleNodes = useMemo(
+    () => nodes.filter((n) => !hiddenTypes.has((n.node_type ?? n.type) as string ?? "")),
+    [nodes, hiddenTypes]
+  );
+
+  const visibleNodeIds = useMemo(
+    () => new Set(visibleNodes.map((n) => n.id)),
+    [visibleNodes]
+  );
+
+  const visibleEdges = useMemo(
+    () => edges.filter((e) => {
+      const src = typeof e.source === "string" ? e.source : (e.source as any).id;
+      const tgt = typeof e.target === "string" ? e.target : (e.target as any).id;
+      return visibleNodeIds.has(src) && visibleNodeIds.has(tgt);
+    }),
+    [edges, visibleNodeIds]
+  );
+
+  // ── Node-type counts for legend (always from full unfiltered set) ──────────
   const typeCounts = nodes.reduce<Record<string, number>>((acc, n) => {
     const t = (n.node_type as string | undefined) ?? "Unknown";
     acc[t] = (acc[t] ?? 0) + 1;
@@ -142,13 +179,24 @@ export default function App() {
           {/* ── Node type legend ── */}
           <p className="sidebar-title">Node Types</p>
           <ul className="legend">
-            {Object.entries(NODE_COLORS).map(([type, color]) => (
-              <li key={type} className="legend-item">
-                <span className="legend-dot" style={{ background: color }} />
-                <span className="legend-label">{type.replace(/_/g, " ")}</span>
-                <span className="legend-count">{typeCounts[type] ?? 0}</span>
-              </li>
-            ))}
+            {Object.entries(NODE_COLORS).map(([type, color]) => {
+              const hidden = hiddenTypes.has(type);
+              return (
+                <li
+                  key={type}
+                  className={`legend-item${hidden ? " legend-item--hidden" : ""}`}
+                  onClick={() => toggleType(type)}
+                  title={hidden ? `Show ${type.replace(/_/g, " ")}` : `Hide ${type.replace(/_/g, " ")}`}
+                >
+                  <span
+                    className="legend-dot"
+                    style={{ background: hidden ? "var(--border)" : color }}
+                  />
+                  <span className="legend-label">{type.replace(/_/g, " ")}</span>
+                  <span className="legend-count">{typeCounts[type] ?? 0}</span>
+                </li>
+              );
+            })}
           </ul>
 
           <div className="sidebar-divider" />
@@ -174,10 +222,10 @@ export default function App() {
             </div>
           ) : (
             <div style={{ position: "relative", width: "100%", height: "100%" }}>
-              {nodes.length > 0 && (
+              {visibleNodes.length > 0 && (
                 <GraphCanvas
-                  nodes={nodes}
-                  edges={edges}
+                  nodes={visibleNodes}
+                  edges={visibleEdges}
                   newNodeIds={newNodeIds}
                 />
               )}
