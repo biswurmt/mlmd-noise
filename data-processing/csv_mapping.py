@@ -1,3 +1,4 @@
+import argparse
 import os
 import json
 import pickle
@@ -77,17 +78,21 @@ def get_semantic_match(raw_diagnosis: str, valid_conditions: list) -> str:
 # ---------------------------------------------------------
 # 3. Main Processing Pipeline
 # ---------------------------------------------------------
-def map_diagnoses_with_llm(csv_input_path: str, graph_pkl_path: str, csv_output_path: str):
-    
+def map_diagnoses_with_llm(
+    csv_input_path: str,
+    graph_pkl_path: str,
+    csv_output_path: str,
+    row_limit: int | None = None,
+):
     # --- Load Graph & Extract Valid Conditions ---
     print("Loading Knowledge Graph...")
     with open(graph_pkl_path, "rb") as f:
         kg = pickle.load(f)
-        
+
     # Extract all nodes that start with "Condition: " and strip the prefix
     available_conditions = [
-        node.replace("Condition: ", "") 
-        for node in kg.nodes 
+        node.replace("Condition: ", "")
+        for node in kg.nodes
         if str(node).startswith("Condition: ")
     ]
     print(f"Found {len(available_conditions)} unique conditions in the graph.")
@@ -97,7 +102,11 @@ def map_diagnoses_with_llm(csv_input_path: str, graph_pkl_path: str, csv_output_
     print(list(df.columns))
     if 'dx' not in df.columns:
         raise ValueError("CSV must contain a 'diagnosis' column.")
-        
+
+    if row_limit is not None:
+        print(f"  [--limit] Restricting to first {row_limit} rows for testing.")
+        df = df.head(row_limit)
+
     unique_raw_diagnoses = df['dx'].dropna().unique()
     print(f"Found {len(unique_raw_diagnoses)} unique raw diagnoses in the CSV to map.")
 
@@ -141,15 +150,36 @@ def map_diagnoses_with_llm(csv_input_path: str, graph_pkl_path: str, csv_output_
 # Execute
 # ---------------------------------------------------------
 if __name__ == "__main__":
-    # --- Configuration ---
-    # Update these paths to match your local file structure
-    INPUT_CSV = "/home/achua/student_data.csv" 
-    OUTPUT_CSV = "patient_diagnoses_with_tests.csv"
-    GRAPH_PKL = "/home/achua/mlmd-noise/knowledge-graphs/triage_knowledge_graph.pkl" # Sourced from your builder script
-    
-    # Run the mapping
-    result_df = map_diagnoses_with_llm(INPUT_CSV, GRAPH_PKL, OUTPUT_CSV)
-    
-    # Display a preview
+    _KG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "knowledge-graphs"))
+
+    parser = argparse.ArgumentParser(
+        description="Semantically map patient diagnoses (dx column) to knowledge-graph conditions."
+    )
+    parser.add_argument(
+        "--input-csv", required=True,
+        help="Path to the input CSV file containing a 'dx' column.",
+    )
+    parser.add_argument(
+        "--output-csv", default="patient_diagnoses_with_tests.csv",
+        help="Path for the enriched output CSV (default: patient_diagnoses_with_tests.csv).",
+    )
+    parser.add_argument(
+        "--graph-pkl",
+        default=os.path.join(_KG_DIR, "triage_knowledge_graph.pkl"),
+        help="Path to triage_knowledge_graph.pkl.",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, metavar="N",
+        help="Process only the first N rows of the CSV. Useful for testing before a full run.",
+    )
+    args = parser.parse_args()
+
+    result_df = map_diagnoses_with_llm(
+        args.input_csv,
+        args.graph_pkl,
+        args.output_csv,
+        row_limit=args.limit,
+    )
+
     print("\n--- Output Preview ---")
     print(result_df[['dx', 'potential_tests']].head())

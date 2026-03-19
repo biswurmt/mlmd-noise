@@ -79,11 +79,28 @@ pathways).
 
 **Usage:**
 ```bash
-# Edit INPUT_CSV, OUTPUT_CSV, and GRAPH_PKL at the bottom of the file, then:
-python csv_mapping.py
+# Full run
+python csv_mapping.py \
+    --input-csv /path/to/student_data.csv \
+    --output-csv patient_diagnoses_with_tests.csv
+
+# Test on the first 20 rows before committing to a full run
+python csv_mapping.py \
+    --input-csv /path/to/student_data.csv \
+    --output-csv test_output.csv \
+    --limit 20
 ```
 
-**Environment variables required** (in `data-processing/.env`):
+**All CLI options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--input-csv` | *(required)* | Input CSV with a `dx` column |
+| `--output-csv` | `patient_diagnoses_with_tests.csv` | Path for the enriched output CSV |
+| `--graph-pkl` | `knowledge-graphs/triage_knowledge_graph.pkl` | Serialised graph to read |
+| `--limit N` | *(all rows)* | Process only the first N rows — useful for testing before a full run |
+
+**Environment variables required** (in `data-processing/.env` or `knowledge-graphs/.env`):
 ```
 ENDPOINT_URL=<Azure OpenAI endpoint>
 DEPLOYMENT_NAME=<model deployment name>
