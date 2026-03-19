@@ -219,7 +219,7 @@ def get_umls_concept(term, sabs, api_key):
     # STEP 1: Get the CUI using a specific search type
     search_params = {
         "string": term,
-        "searchType": "exact", # Forces a direct match, bypassing their complex text parser
+        "searchType": "normalizedString",
         "apiKey": api_key
     }
     

@@ -38,9 +38,13 @@ _RULES_FILE = os.path.join(_KG_DIR, "guideline_rules.json")
 # ─────────────────────────────────────────────────────────────────────────────
 # Azure OpenAI client — uses AzureCliCredential (no API key required).
 # Set ENDPOINT_URL and DEPLOYMENT_NAME in knowledge-graphs/.env.
+# Optionally set BING_SEARCH_KEY to enable live web search grounding for
+# guidelines that fall outside the four encoded in the system (AHA/ACC, CTAS,
+# ACR, NICE).  Without this key the LLM falls back to its training knowledge.
 # ─────────────────────────────────────────────────────────────────────────────
 _endpoint = os.environ.get("ENDPOINT_URL")
 _deployment = os.environ.get("DEPLOYMENT_NAME")
+_bing_key = os.environ.get("BING_SEARCH_KEY")
 
 if not _endpoint:
     raise ValueError(
@@ -78,7 +82,19 @@ VALID_NODE_TYPES = {
 
 SYSTEM_PROMPT = """\
 You are a clinical knowledge engineer that populates a medical triage knowledge graph.
-Given a diagnostic test name, generate triage rules following the EXACT schema below.
+Given a diagnostic test name, generate triage rules grounded in AUTHORITATIVE CLINICAL
+GUIDELINES only.
+
+GUIDELINE GROUNDING REQUIREMENTS (critical):
+- The four guidelines already encoded in the system are: AHA/ACC, CTAS, ACR, NICE.
+  Prefer these when they cover the diagnostic test.
+- For any test not covered by those four, you MUST identify the relevant authoritative
+  source (e.g. ESC, ACEP, WHO, IDSA, GOLD, ACOG, Endocrine Society, NCCN, UpToDate)
+  and base every rule on specific recommendations from that source.
+- The "source" field must be a real, recognised guideline body abbreviation — never
+  invent a source or use a generic label like "Clinical Practice".
+- Every condition you name must be one for which the test is formally recommended by the
+  cited guideline; do not include speculative or unsupported pairings.
 
 OUTPUT FORMAT: A valid JSON array and nothing else — no markdown fences, no explanation.
 
@@ -92,13 +108,13 @@ Each rule is a JSON object with these fields:
   "condition"    (required) — medical condition the symptom/finding indicates
                               (e.g. "Pulmonary Embolism", "Subdural Hematoma")
   "test"         (required) — MUST be the exact diagnostic test string provided
-  "source"       (required) — real guideline abbreviation
+  "source"       (required) — authoritative guideline abbreviation
                               (e.g. "ACR", "AHA/ACC", "NICE", "ESC", "ACEP", "WHO", "IDSA")
   "treatment"    (optional) — include ONLY when there is a well-established first-line
-                              treatment (e.g. "Aspirin", "Alteplase")
+                              treatment explicitly recommended by the cited guideline
+                              (e.g. "Aspirin", "Alteplase")
 
-Generate 8–15 rules spanning at least 3 distinct conditions. \
-Use real clinical guideline sources. Be clinically accurate.\
+Generate 8–15 rules spanning at least 3 distinct conditions. Be clinically accurate.\
 """
 
 
@@ -113,10 +129,33 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
     # ── 2. LLM extraction ────────────────────────────────────────────────────
     user_message = (
         f'Generate triage rules for the diagnostic test: "{diagnostic_test}"\n\n'
+        f"The system already encodes rules from AHA/ACC, CTAS, ACR, and NICE. "
+        f"If '{diagnostic_test}' is covered by one of those four guidelines, use them. "
+        f"If it requires a different guideline body (e.g. ESC, ACEP, IDSA, GOLD, ACOG), "
+        f"identify the correct authoritative source and base every rule on its specific "
+        f"recommendations.\n\n"
         f"Cover at least 3–4 different conditions this test can diagnose and include "
         f"a mix of node types (Symptom, Vital_Sign_Threshold, Risk_Factor, etc.).\n\n"
         f'IMPORTANT: the "test" field must be exactly "{diagnostic_test}" for every rule.'
     )
+
+    # Attach Bing Search grounding when a key is configured so the model can
+    # retrieve up-to-date guideline content for tests outside the four encoded
+    # sources.  Falls back to training knowledge when the key is absent.
+    extra_kwargs: dict = {}
+    if _bing_key:
+        extra_kwargs["extra_body"] = {
+            "data_sources": [
+                {
+                    "type": "bing_search",
+                    "parameters": {
+                        "endpoint": "https://api.bing.microsoft.com/",
+                        "key": _bing_key,
+                        "search_strictness": 3,
+                    },
+                }
+            ]
+        }
 
     response = _CLIENT.chat.completions.create(
         model=_deployment,
@@ -125,6 +164,7 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
             {"role": "user", "content": user_message},
         ],
         # response_format={"type": "json_object"}, # commented out because the older model version
+        **extra_kwargs,
     )
 
     text = response.choices[0].message.content
