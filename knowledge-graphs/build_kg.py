@@ -259,8 +259,10 @@ def get_umls_concept(term, sabs, api_key):
         atoms_results = atoms_resp.json().get("result", [])
         
         if atoms_results:
-            # Grab the source code (e.g., the exact ICD10CM or LNC code)
-            source_code = atoms_results[0]["ui"]
+            # "code" is the source vocabulary code (e.g. "I21.9" for ICD-10-CM,
+            # "11524-6" for LOINC). "ui" is the UMLS-internal AUI and must NOT
+            # be used here — it looks like "A17786738" and is not a real code.
+            source_code = atoms_results[0].get("code") or atoms_results[0].get("ui")
             return best_name, source_code
             
         return best_name, None
