@@ -6,10 +6,16 @@ import networkx as nx
 from azure.identity import AzureCliCredential, get_bearer_token_provider
 from openai import AzureOpenAI
 
-from dotenv import load_dotenv # <--- ADD THIS
+from dotenv import load_dotenv
 
-# --- Load the .env file! --- # <--- ADD THIS BLOCK
-env_path = os.path.join(os.path.dirname(__file__), ".env")
+# 1. Get the directory of your current script (data-processing)
+current_dir = os.path.dirname(__file__)
+
+# 2. Go UP one level (..), then DOWN into knowledge-graphs
+env_path = os.path.abspath(os.path.join(current_dir, "..", "knowledge-graphs", ".env"))
+
+# 3. Load the file
+load_dotenv(env_path, override=True)
 load_dotenv(env_path)
 # ---------------------------------------------------------
 # 1. Setup Azure OpenAI Client
@@ -139,7 +145,7 @@ if __name__ == "__main__":
     # Update these paths to match your local file structure
     INPUT_CSV = "/home/achua/student_data.csv" 
     OUTPUT_CSV = "patient_diagnoses_with_tests.csv"
-    GRAPH_PKL = "triage_knowledge_graph.pkl" # Sourced from your builder script
+    GRAPH_PKL = "/home/achua/mlmd-noise/knowledge-graphs/triage_knowledge_graph.pkl" # Sourced from your builder script
     
     # Run the mapping
     result_df = map_diagnoses_with_llm(INPUT_CSV, GRAPH_PKL, OUTPUT_CSV)

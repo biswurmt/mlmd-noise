@@ -237,16 +237,29 @@ def get_umls_concept(term, sabs, api_key):
         # STEP 2: Now that we safely have the CUI, ask for the specific vocabulary code
         atoms_url = f"https://uts-ws.nlm.nih.gov/rest/content/current/CUI/{cui}/atoms"
         atoms_params = {
-            "sabs": sabs, # Filter by ICD10CM here instead
+            "sabs": sabs, 
             "apiKey": api_key
         }
         
         atoms_resp = requests.get(atoms_url, params=atoms_params)
-        atoms_resp.raise_for_status()
+        
+        # Handle the potential 404 error gracefully
+        try:
+            atoms_resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            if atoms_resp.status_code == 404:
+                # 404 means the CUI exists, but no atoms match the 'sabs' filter
+                return best_name, None
+            else:
+                # If it's a 401 (Unauthorized) or 500 (Server Error), we still want it to crash/log
+                print(f"API Error: {e}")
+                return best_name, None
+                
+        # If no error, proceed as normal
         atoms_results = atoms_resp.json().get("result", [])
         
         if atoms_results:
-            # Grab the source code (e.g., the exact ICD10CM code)
+            # Grab the source code (e.g., the exact ICD10CM or LNC code)
             source_code = atoms_results[0]["ui"]
             return best_name, source_code
             
