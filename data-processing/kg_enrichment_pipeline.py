@@ -140,6 +140,83 @@ def extract_unique_tests(graph_json_path: str) -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Step 1b — LLM ranking: select the top X tests to add to the graph
+# ─────────────────────────────────────────────────────────────────────────────
+
+def select_top_tests(
+    candidate_tests: list[str],
+    existing_tests: set[str],
+    top_x: int,
+) -> list[str]:
+    """Ask the LLM to rank *candidate_tests* (excluding already-present ones)
+    and return the top *top_x* tests most valuable to add to the knowledge graph.
+
+    A single LLM call is made.  The returned list preserves the LLM's priority
+    order (highest-value first) and is capped at *top_x* entries.
+    """
+    new_candidates = [t for t in candidate_tests if t not in existing_tests]
+
+    if not new_candidates:
+        print("  [top-x] No new candidate tests to rank — all already in graph.")
+        return []
+
+    if top_x >= len(new_candidates):
+        print(
+            f"  [top-x] Requested top {top_x} but only {len(new_candidates)} "
+            "new candidates exist — returning all."
+        )
+        return new_candidates
+
+    system_prompt = (
+        "You are a clinical informatics expert advising on which diagnostic tests "
+        "to prioritise when expanding a medical triage knowledge graph. "
+        "You will be given a list of candidate diagnostic test names. "
+        "Rank them by clinical importance — consider prevalence in emergency and "
+        "primary-care settings, breadth of conditions they help diagnose, and the "
+        "availability of authoritative guideline coverage (e.g. ACR, AHA/ACC, NICE, "
+        "ACEP, IDSA, ESC). "
+        "Respond ONLY with a valid JSON object: "
+        "{\"top_tests\": [\"Test Name 1\", \"Test Name 2\", ...]} "
+        "— no explanation, no markdown."
+    )
+
+    user_prompt = (
+        f"Select the top {top_x} most clinically important tests from this list "
+        f"to add to an emergency-department triage knowledge graph:\n"
+        f"{json.dumps(new_candidates, indent=2)}"
+    )
+
+    print(f"  [top-x] Asking LLM to rank {len(new_candidates)} candidates and select top {top_x} …")
+    try:
+        response = _CLIENT.chat.completions.create(
+            model=_deployment,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+        )
+        result = json.loads(response.choices[0].message.content)
+        ranked = result.get("top_tests", [])
+
+        # Validate: keep only names that actually appeared in the candidate list
+        candidate_set = set(new_candidates)
+        validated = [t for t in ranked if t in candidate_set]
+
+        if not validated:
+            print("  [top-x] WARNING: LLM returned no recognisable test names — falling back to first top_x candidates.")
+            return new_candidates[:top_x]
+
+        selected = validated[:top_x]
+        print(f"  [top-x] Selected: {selected}")
+        return selected
+
+    except Exception as exc:
+        print(f"  [top-x] LLM ranking failed ({exc}) — falling back to first {top_x} candidates.")
+        return new_candidates[:top_x]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Step 2 — Generate rules for a single test via Azure OpenAI
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -415,6 +492,14 @@ def _parse_args() -> argparse.Namespace:
         "--skip-rebuild", action="store_true",
         help="Skip LLM rule generation + graph rebuild (steps 1–4). Use existing PKL.",
     )
+    p.add_argument(
+        "--top-x", type=int, default=None, metavar="X",
+        help=(
+            "Ask the LLM to rank all new candidate tests and select only the top X "
+            "most clinically important ones to add to the graph. "
+            "Omit this flag to add every new test found in the graph-json file."
+        ),
+    )
     return p.parse_args()
 
 
@@ -426,6 +511,17 @@ def main() -> None:
         print(f"\n[Step 1] Extracting diagnostic tests from '{args.graph_json}' …")
         tests = extract_unique_tests(args.graph_json)
         print(f"  {len(tests)} unique tests found: {tests}")
+
+        # ── Step 1b (optional): rank and select top X ────────────────────────
+        if args.top_x is not None:
+            print(f"\n[Step 1b] Selecting top {args.top_x} tests via LLM ranking …")
+            with open(args.rules_json, "r") as f:
+                _existing_rules = json.load(f)
+            _existing_test_names: set[str] = {
+                r["test"] for r in _existing_rules if isinstance(r, dict) and "test" in r
+            }
+            tests = select_top_tests(tests, _existing_test_names, args.top_x)
+            print(f"  Proceeding with {len(tests)} test(s): {tests}")
 
         # ── Step 2-3: generate + append rules ────────────────────────────────
         print(f"\n[Step 2-3] Generating and appending rules to '{args.rules_json}' …")
