@@ -84,6 +84,38 @@ function linkTooltip(link: FGLink): string {
 
 // ── Tooltip content ───────────────────────────────────────────────────────────
 
+/**
+ * UMLS returns codes as full REST URLs, e.g.:
+ *   https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/D63.1
+ * Extract the final path segment as the display label and keep the full URL
+ * as the href so the user can click through to the UMLS entry.
+ * Non-URL values (e.g. plain codes like "HP:0001658") are returned as-is
+ * with no href.
+ */
+function parseCode(raw: string): { label: string; href: string | null } {
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    const label = raw.split("/").filter(Boolean).pop() ?? raw;
+    return { label, href: raw };
+  }
+  return { label: raw, href: null };
+}
+
+function CodeRow({ prefix, raw }: { prefix: string; raw: string }) {
+  const { label, href } = parseCode(raw);
+  return (
+    <div className="gt-row">
+      <span>{prefix}</span>
+      {href ? (
+        <a className="gt-code-link" href={href} target="_blank" rel="noreferrer">
+          <code>{label}</code> ↗
+        </a>
+      ) : (
+        <code>{label}</code>
+      )}
+    </div>
+  );
+}
+
 function NodeTooltip({ node }: { node: FGNode }) {
   const typ      = node.node_type ?? node.type;
   const label    = String(node.id).replace(/^[^:]+:\s*/, "");
@@ -98,11 +130,11 @@ function NodeTooltip({ node }: { node: FGNode }) {
       {(node.ebi_open_code || node.snomed_ca_code || node.icd10_code ||
         node.loinc_code || node.rxcui) && (
         <div className="gt-section">
-          {node.ebi_open_code  && <div className="gt-row"><span>HP/MONDO</span><code>{node.ebi_open_code}</code></div>}
-          {node.snomed_ca_code && <div className="gt-row"><span>SNOMED-CT</span><code>{node.snomed_ca_code}</code></div>}
-          {node.icd10_code     && <div className="gt-row"><span>ICD-10</span><code>{node.icd10_code}</code></div>}
-          {node.loinc_code     && <div className="gt-row"><span>LOINC</span><code>{node.loinc_code}</code></div>}
-          {node.rxcui          && <div className="gt-row"><span>RxCUI</span><code>{node.rxcui}</code></div>}
+          {node.ebi_open_code  && <CodeRow prefix="HP/MONDO"  raw={node.ebi_open_code  as string} />}
+          {node.snomed_ca_code && <CodeRow prefix="SNOMED-CT" raw={node.snomed_ca_code as string} />}
+          {node.icd10_code     && <CodeRow prefix="ICD-10"    raw={node.icd10_code     as string} />}
+          {node.loinc_code     && <CodeRow prefix="LOINC"     raw={node.loinc_code     as string} />}
+          {node.rxcui          && <CodeRow prefix="RxCUI"     raw={node.rxcui          as string} />}
         </div>
       )}
 

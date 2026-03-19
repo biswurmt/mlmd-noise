@@ -419,6 +419,20 @@ html, body, #root {
   text-decoration: underline;
 }
 
+.gt-code-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--blue-hover);
+  text-decoration: none;
+  pointer-events: auto;
+  font-size: 11px;
+}
+
+.gt-code-link:hover code {
+  text-decoration: underline;
+}
+
 /* ─── Chat bar (fixed bottom) ────────────────────────────────────────────────── */
 .chat-bar {
   position: fixed;
