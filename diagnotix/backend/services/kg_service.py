@@ -80,6 +80,38 @@ VALID_NODE_TYPES = {
     "Mechanism_of_Injury",
 }
 
+# Recognised authoritative guideline bodies — rules citing anything outside
+# this set are rejected at the schema-validation stage before the LLM review.
+VALID_SOURCES = {
+    "AHA/ACC", "CTAS", "ACR", "NICE", "ESC", "ACEP", "WHO", "IDSA", "GOLD",
+    "ACOG", "NCCN", "Endocrine Society", "ASA", "AASLD", "ADA", "ATS", "ERS",
+    "ISHLT", "BSH", "SIGN", "EASL", "EULAR", "ACG", "AGA", "SAGES", "STS",
+    "ACC", "AHA", "CHEST", "USPSTF", "CDC", "AAP", "AAFP", "CCS", "CTS",
+}
+
+VERIFICATION_PROMPT = """\
+You are a senior clinical knowledge reviewer auditing LLM-generated triage rules before
+they are committed to a medical knowledge graph used in real clinical decision support.
+Your only job is to REMOVE inaccurate or unsupported rules — do not add or rewrite.
+
+For each rule in the array you receive, verify ALL three criteria:
+
+1. SOURCE accuracy — does the cited guideline body (the "source" field) actually publish
+   formal recommendations for the given diagnostic test? A source is invalid if it is
+   fabricated, misattributed, or merely tangentially related.
+
+2. CLINICAL plausibility — is the raw_symptom → condition → test pathway an explicitly
+   recognised clinical indication in the cited guideline? Generic pairings that are not
+   directly backed by a specific recommendation must be removed.
+
+3. CONDITION specificity — the "condition" must be a real, named diagnosis (e.g.
+   "Pulmonary Embolism", not "Respiratory Distress"). Vague descriptors are not conditions.
+
+Return ONLY the rules that pass all three checks, unchanged, as a plain JSON array.
+Do NOT add new rules. When in doubt, remove — a false negative is safer than a false positive.
+Output valid JSON only (a bare array, no markdown fences, no explanation).\
+"""
+
 SYSTEM_PROMPT = """\
 You are a clinical knowledge engineer that populates a medical triage knowledge graph.
 Given a diagnostic test name, generate triage rules grounded in AUTHORITATIVE CLINICAL
@@ -116,6 +148,58 @@ Each rule is a JSON object with these fields:
 
 Generate 8–15 rules spanning at least 3 distinct conditions. Be clinically accurate.\
 """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verification helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _verify_rules(rules: list[dict], diagnostic_test: str) -> list[dict]:
+    """Send generated rules to the LLM for a second-pass clinical accuracy review.
+
+    The model acts as a clinical reviewer and returns only the rules that pass
+    three checks: source accuracy, clinical plausibility, and condition specificity.
+    If the verification call itself fails, the original rules are returned unchanged
+    so the pipeline is not blocked.
+    """
+    if not rules:
+        return rules
+
+    try:
+        response = _CLIENT.chat.completions.create(
+            model=_deployment,
+            messages=[
+                {"role": "system", "content": VERIFICATION_PROMPT},
+                {"role": "user", "content": (
+                    f'Diagnostic test under review: "{diagnostic_test}"\n\n'
+                    f"Rules to verify:\n{json.dumps(rules, indent=2)}"
+                )},
+            ],
+        )
+        text = response.choices[0].message.content or ""
+        try:
+            verified = json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\[.*\]", text, re.DOTALL)
+            verified = json.loads(match.group()) if match else None
+
+        if isinstance(verified, dict):
+            verified = next((v for v in verified.values() if isinstance(v, list)), None)
+
+        if not isinstance(verified, list):
+            print("  [verify] Could not parse verification response — keeping original rules.")
+            return rules
+
+        dropped = len(rules) - len(verified)
+        if dropped > 0:
+            print(f"  [verify] Removed {dropped} rule(s) that failed clinical review.")
+        else:
+            print(f"  [verify] All {len(rules)} rule(s) passed clinical review.")
+        return verified
+
+    except Exception as e:
+        print(f"  [verify] Verification call failed ({e}) — keeping original rules.")
+        return rules
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,21 +280,35 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
     else:
         raise ValueError("Azure OpenAI response was not a JSON array or object.")
 
-    # ── 4. Validate rules ────────────────────────────────────────────────────
+    # ── 4. Schema validation ─────────────────────────────────────────────────
+    REQUIRED = {"raw_symptom", "node_type", "condition", "test", "source"}
     valid_rules = []
     for rule in new_rules:
         if not isinstance(rule, dict):
             continue
-        if not {"raw_symptom", "node_type", "condition", "test", "source"}.issubset(rule):
+        if not REQUIRED.issubset(rule):
             continue
         if rule["node_type"] not in VALID_NODE_TYPES:
             rule["node_type"] = "Symptom"
+        if rule["source"] not in VALID_SOURCES:
+            print(f"  [schema] Dropped rule with unrecognised source '{rule['source']}'.")
+            continue
         rule["test"] = diagnostic_test
         valid_rules.append(rule)
 
     if not valid_rules:
         raise ValueError(
             f"Azure OpenAI generated {len(new_rules)} raw rules but none passed schema validation."
+        )
+
+    # ── 4b. LLM verification pass ────────────────────────────────────────────
+    print(f"  Running verification pass on {len(valid_rules)} schema-valid rule(s)...")
+    valid_rules = _verify_rules(valid_rules, diagnostic_test)
+
+    if not valid_rules:
+        raise ValueError(
+            "All generated rules were removed during clinical verification. "
+            "Try rephrasing the test name or check that it has authoritative guideline coverage."
         )
 
     # ── 5. Append to guideline_rules.json ────────────────────────────────────
