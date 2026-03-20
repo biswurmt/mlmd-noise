@@ -150,22 +150,34 @@ function NodeTooltip({ node }: { node: FGNode }) {
       )}
 
       {/* ── Evidence counts (Condition nodes) ── */}
-      {typ === "Condition" && (
-        (node.literature_articles != null || node.literature_patents != null || node.trial_count != null)
-      ) && (
-        <div className="gt-section">
-          <div className="gt-label">Evidence</div>
-          {node.literature_articles != null && (
-            <div className="gt-row"><span>Articles</span><span>{node.literature_articles as number}</span></div>
-          )}
-          {node.literature_patents != null && (
-            <div className="gt-row"><span>Patents</span><span>{node.literature_patents as number}</span></div>
-          )}
-          {!!node.trial_count && (
-            <div className="gt-row"><span>Trials</span><span>{node.trial_count as number}</span></div>
-          )}
-        </div>
-      )}
+      {typ === "Condition" && (() => {
+        const evidence = Array.isArray(node.test_evidence)
+          ? node.test_evidence as { test: string; articles?: number; patents?: number }[]
+          : [];
+        const trials = node.trial_count as number | undefined;
+        if (evidence.length === 0 && !trials) return null;
+        return (
+          <div className="gt-section">
+            {evidence.map(e => (
+              <div key={e.test}>
+                <div className="gt-label">Co-occurrence with {e.test}</div>
+                {e.articles != null && (
+                  <div className="gt-row"><span>Articles</span><span>{e.articles}</span></div>
+                )}
+                {e.patents != null && (
+                  <div className="gt-row"><span>Patents</span><span>{e.patents}</span></div>
+                )}
+              </div>
+            ))}
+            {!!trials && (
+              <div>
+                <div className="gt-label">Clinical Trials</div>
+                <div className="gt-row"><span>Registered studies</span><span>{trials}</span></div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Supporting documentation (Test nodes) ── */}
       {node.guideline_source && (

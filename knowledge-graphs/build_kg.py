@@ -469,8 +469,10 @@ def build_unified_medical_kg(df):
         icd10_code         = row.get("icd10_code")             if "icd10_code"        in df.columns else None
         lit_articles       = row.get("lit_articles")           if "lit_articles"      in df.columns else None
         lit_patents        = row.get("lit_patents")            if "lit_patents"       in df.columns else None
-        test_lit_articles  = row.get("test_lit_articles")      if "test_lit_articles" in df.columns else None
-        test_lit_patents   = row.get("test_lit_patents")       if "test_lit_patents"  in df.columns else None
+        test_lit_articles  = row.get("test_lit_articles")      if "test_lit_articles"   in df.columns else None
+        test_lit_patents   = row.get("test_lit_patents")       if "test_lit_patents"    in df.columns else None
+        direct_lit_articles = row.get("direct_lit_articles")  if "direct_lit_articles" in df.columns else None
+        direct_lit_patents  = row.get("direct_lit_patents")   if "direct_lit_patents"  in df.columns else None
 
         G.add_node(primary_node, **node_attrs, synonyms=node_synonyms)
         G.add_node(condition_node, type="Condition", icd10_code=icd10_code, synonyms=[])
@@ -486,7 +488,8 @@ def build_unified_medical_kg(df):
                    source=row["source"], source_url=guideline_url,
                    literature_articles=test_lit_articles, literature_patents=test_lit_patents)
         G.add_edge(primary_node,   test_node,      relationship="DIRECTLY_INDICATES_TEST",
-                   source=row["source"], source_url=guideline_url)
+                   source=row["source"], source_url=guideline_url,
+                   literature_articles=direct_lit_articles, literature_patents=direct_lit_patents)
 
         # Treatment / Adverse Event sub-graph — only for rules that carry a treatment
         if "treatment" in df.columns and pd.notna(row.get("treatment")):
@@ -508,28 +511,32 @@ def build_unified_medical_kg(df):
                 G.add_edge(treatment_node, adverse_event_node,
                            relationship="HAS_ADVERSE_EVENT")
 
-    # Aggregate literature + trial evidence counts onto each Condition node so
-    # the frontend can display a per-condition breakdown without needing to
-    # traverse edges client-side.
+    # Attach per-test evidence onto each Condition node so the frontend can
+    # label counts as "co-occurrence with <Test>" rather than anonymous totals.
+    # Uses the outgoing REQUIRES_TEST edges, which carry the condition↔test
+    # literature counts collected in step 8.
     for node, attrs in list(G.nodes(data=True)):
         if attrs.get("type") != "Condition":
             continue
-        articles = sum(
-            d.get("literature_articles") or 0
-            for _, _, d in G.in_edges(node, data=True)
-        )
-        patents = sum(
-            d.get("literature_patents") or 0
-            for _, _, d in G.in_edges(node, data=True)
-        )
+        test_evidence = []
+        for _, tgt, d in G.out_edges(node, data=True):
+            if d.get("relationship") != "REQUIRES_TEST":
+                continue
+            test_label = str(tgt).replace("Test: ", "")
+            entry = {"test": test_label}
+            if d.get("literature_articles") is not None:
+                entry["articles"] = int(d["literature_articles"] or 0)
+            if d.get("literature_patents") is not None:
+                entry["patents"] = int(d["literature_patents"] or 0)
+            test_evidence.append(entry)
+        # Trial counts come from outgoing RECOMMENDS_TREATMENT edges
         trials = sum(
             d.get("trial_count") or 0
             for _, _, d in G.out_edges(node, data=True)
             if d.get("relationship") == "RECOMMENDS_TREATMENT"
         )
-        G.nodes[node]["literature_articles"] = articles
-        G.nodes[node]["literature_patents"]  = patents
-        G.nodes[node]["trial_count"]         = trials
+        G.nodes[node]["test_evidence"] = test_evidence
+        G.nodes[node]["trial_count"]   = trials
 
     return G
 
@@ -651,7 +658,21 @@ def generate_knowledge_graph():
         lambda row: ct_lit_map.get((row["condition"], row["test"]), {}).get("patents", 0), axis=1
     )
 
-    # 9. ClinicalTrials.gov trial counts (condition ↔ treatment)
+    # 9. Europe PMC literature breakdown (symptom ↔ test): backs DIRECTLY_INDICATES_TEST edges
+    print("Fetching Europe PMC literature breakdown (symptom ↔ test)...")
+    unique_st_lit_pairs = df_rules[["raw_symptom", "test"]].drop_duplicates()
+    st_lit_map = {}
+    for _, pair in unique_st_lit_pairs.iterrows():
+        st_lit_map[(pair["raw_symptom"], pair["test"])] = \
+            get_literature_breakdown(pair["raw_symptom"], pair["test"])
+    df_rules["direct_lit_articles"] = df_rules.apply(
+        lambda row: st_lit_map.get((row["raw_symptom"], row["test"]), {}).get("articles", 0), axis=1
+    )
+    df_rules["direct_lit_patents"] = df_rules.apply(
+        lambda row: st_lit_map.get((row["raw_symptom"], row["test"]), {}).get("patents", 0), axis=1
+    )
+
+    # 11. ClinicalTrials.gov trial counts (condition ↔ treatment)
     if "treatment" in df_rules.columns:
         unique_ct_pairs = (
             df_rules[df_rules["treatment"].notna()][["condition", "treatment"]]
