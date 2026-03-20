@@ -180,7 +180,6 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
   const [pinnedNode, setPinnedNode]     = useState<FGNode | null>(null);
   const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
   const [pinnedPos, setPinnedPos]       = useState({ x: 0, y: 0 });
-  const hoveredNodeRef = useRef<FGNode | null>(null);
 
   // ── Responsive container ────────────────────────────────────────────────────
   useEffect(() => {
@@ -251,7 +250,6 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
 
   // ── Hover tooltip ───────────────────────────────────────────────────────────
   const handleNodeHover = useCallback((node: FGNode | null) => {
-    hoveredNodeRef.current = node;
     setHoveredNode(node);
   }, []);
 
@@ -262,10 +260,10 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
     setPinnedPos(tooltipPos);
   }, [tooltipPos]);
 
-  // When the mouse leaves the pinned tooltip, dismiss it only if the cursor
-  // is also not currently over a node.
+  // Always dismiss the pin when the mouse leaves the tooltip.
+  // If the cursor moves onto a node the hover tooltip takes over immediately.
   const handleTooltipLeave = useCallback(() => {
-    if (!hoveredNodeRef.current) setPinnedNode(null);
+    setPinnedNode(null);
   }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
