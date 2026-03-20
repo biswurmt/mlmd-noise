@@ -281,6 +281,25 @@ def get_umls_concept(term, sabs, api_key):
         return term, None
 
 
+def get_icd10_nlm(term):
+    """Query the free NLM Clinical Tables ICD-10-CM API for the closest matching code.
+
+    No API key required. Returns the ICD-10-CM code string (e.g. "I21.9"),
+    or None if not found.
+    """
+    url = "https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search"
+    params = {"sf": "code,name", "terms": term, "maxList": 5}
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()  # [total, [codes], None, [[code, name], ...]]
+        items = data[3] if len(data) > 3 else []
+        return items[0][0] if items else None
+    except Exception as e:
+        print(f"  NLM ICD-10 error for '{term}': {e}")
+        return None
+
+
 def get_rxnorm_rxcui(term):
     """Query the free NLM RxNorm REST API for an RxCUI given a drug name.
 
@@ -322,34 +341,41 @@ def get_openfda_adverse_event(term):
         return None
 
 
-def get_literature_cooccurrence(term1, term2):
-    """Query Europe PMC for the number of articles mentioning both term1 and term2.
+def get_literature_breakdown(term1, term2):
+    """Query Europe PMC for article and patent counts co-mentioning term1 and term2.
 
-    Uses the Europe PMC REST search API (no key required).
-    Returns the hitCount integer, or 0 on failure / no results.
+    Makes two requests — one excluding patents (NOT SRC:PAT) for peer-reviewed
+    articles/preprints and one restricted to patents (SRC:PAT) — so callers
+    receive a granular evidence breakdown rather than a single total.
+
+    Returns {"articles": int, "patents": int}, or {"articles": 0, "patents": 0}
+    on failure.  Results are cached in-memory by normalised term pair.
     """
     key = (term1.lower(), term2.lower())
     if key in _lit_cache:
         return _lit_cache[key]
 
-    params = {
-        "query":    f'({term1}) AND ({term2})',
-        "format":   "json",
-        "pageSize": 1,
-    }
-    try:
-        response = requests.get(
-            "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
-            params=params,
-        )
-        response.raise_for_status()
-        hit_count = response.json().get("hitCount", 0)
-    except Exception as e:
-        print(f"  Europe PMC error for ('{term1}', '{term2}'): {e}")
-        hit_count = 0
+    base_url   = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+    base_query = f'({term1}) AND ({term2})'
 
-    _lit_cache[key] = hit_count
-    return hit_count
+    def _count(extra_filter):
+        try:
+            r = requests.get(
+                base_url,
+                params={"query": f"{base_query} {extra_filter}", "format": "json", "pageSize": 1},
+            )
+            r.raise_for_status()
+            return r.json().get("hitCount", 0)
+        except Exception as e:
+            print(f"  Europe PMC error for ('{term1}', '{term2}'): {e}")
+            return 0
+
+    result = {
+        "articles": _count("NOT SRC:PAT"),
+        "patents":  _count("SRC:PAT"),
+    }
+    _lit_cache[key] = result
+    return result
 
 
 def get_clinical_trials_count(condition, treatment):
@@ -426,11 +452,13 @@ def build_unified_medical_kg(df):
         raw_synonyms  = row.get("synonyms") if "synonyms" in df.columns else None
         node_synonyms = raw_synonyms if isinstance(raw_synonyms, list) else []
 
-        guideline_url          = row["url"]                          if "url"                     in df.columns else None
-        loinc_code             = row.get("loinc_code")               if "loinc_code"              in df.columns else None
-        icd10_code             = row.get("icd10_code")               if "icd10_code"              in df.columns else None
-        literature_weight      = row.get("literature_weight")        if "literature_weight"       in df.columns else None
-        test_literature_weight = row.get("test_literature_weight")   if "test_literature_weight"  in df.columns else None
+        guideline_url      = row["url"]                        if "url"               in df.columns else None
+        loinc_code         = row.get("loinc_code")             if "loinc_code"        in df.columns else None
+        icd10_code         = row.get("icd10_code")             if "icd10_code"        in df.columns else None
+        lit_articles       = row.get("lit_articles")           if "lit_articles"      in df.columns else None
+        lit_patents        = row.get("lit_patents")            if "lit_patents"       in df.columns else None
+        test_lit_articles  = row.get("test_lit_articles")      if "test_lit_articles" in df.columns else None
+        test_lit_patents   = row.get("test_lit_patents")       if "test_lit_patents"  in df.columns else None
 
         G.add_node(primary_node, **node_attrs, synonyms=node_synonyms)
         G.add_node(condition_node, type="Condition", icd10_code=icd10_code, synonyms=[])
@@ -441,10 +469,10 @@ def build_unified_medical_kg(df):
         #   (1) primary → condition  (2) condition → test  (3) primary → test (shortcut)
         G.add_edge(primary_node,   condition_node, relationship="INDICATES_CONDITION",
                    source=row["source"], source_url=guideline_url,
-                   literature_weight=literature_weight)
+                   literature_articles=lit_articles, literature_patents=lit_patents)
         G.add_edge(condition_node, test_node,      relationship="REQUIRES_TEST",
                    source=row["source"], source_url=guideline_url,
-                   test_literature_weight=test_literature_weight)
+                   literature_articles=test_lit_articles, literature_patents=test_lit_patents)
         G.add_edge(primary_node,   test_node,      relationship="DIRECTLY_INDICATES_TEST",
                    source=row["source"], source_url=guideline_url)
 
@@ -467,6 +495,29 @@ def build_unified_medical_kg(df):
                 G.add_node(adverse_event_node, type="Adverse_Event")
                 G.add_edge(treatment_node, adverse_event_node,
                            relationship="HAS_ADVERSE_EVENT")
+
+    # Aggregate literature + trial evidence counts onto each Condition node so
+    # the frontend can display a per-condition breakdown without needing to
+    # traverse edges client-side.
+    for node, attrs in list(G.nodes(data=True)):
+        if attrs.get("type") != "Condition":
+            continue
+        articles = sum(
+            d.get("literature_articles") or 0
+            for _, _, d in G.in_edges(node, data=True)
+        )
+        patents = sum(
+            d.get("literature_patents") or 0
+            for _, _, d in G.in_edges(node, data=True)
+        )
+        trials = sum(
+            d.get("trial_count") or 0
+            for _, _, d in G.out_edges(node, data=True)
+            if d.get("relationship") == "RECOMMENDS_TREATMENT"
+        )
+        G.nodes[node]["literature_articles"] = articles
+        G.nodes[node]["literature_patents"]  = patents
+        G.nodes[node]["trial_count"]         = trials
 
     return G
 
@@ -534,17 +585,18 @@ def generate_knowledge_graph():
         print("  WARNING: UMLS API key unavailable — LOINC codes will be omitted.")
         df_rules["loinc_code"] = None
 
-    # 5. ICD-10-CM codes via UMLS — one lookup per unique condition name
-    if UMLS_API_KEY:
-        print("Looking up ICD-10-CM codes via UMLS...")
-        icd10_map = {}
-        for condition_name in df_rules["condition"].unique():
+    # 5. ICD-10-CM codes — NLM Clinical Tables (no key, always available) as
+    #    the primary source, with UMLS normalizedString as a fallback when a
+    #    key is present (catches conditions the NLM index ranks poorly).
+    print("Looking up ICD-10-CM codes via NLM Clinical Tables...")
+    icd10_map = {}
+    for condition_name in df_rules["condition"].unique():
+        code = get_icd10_nlm(condition_name)
+        if not code and UMLS_API_KEY:
             _, code = get_umls_concept(condition_name, "ICD10CM", UMLS_API_KEY)
-            icd10_map[condition_name] = code
-        df_rules["icd10_code"] = df_rules["condition"].map(icd10_map)
-    else:
-        print("  WARNING: UMLS API key unavailable — ICD-10-CM codes will be omitted.")
-        df_rules["icd10_code"] = None
+        icd10_map[condition_name] = code
+        print(f"  {condition_name} → {code if code else 'not found'}")
+    df_rules["icd10_code"] = df_rules["condition"].map(icd10_map)
 
     # 6. RxNorm RxCUI + OpenFDA adverse events — only for rows that carry a treatment
     if "treatment" in df_rules.columns:
@@ -559,26 +611,32 @@ def generate_knowledge_graph():
             df_rules["rxcui"]         = df_rules["treatment"].map(rxcui_map)
             df_rules["adverse_event"] = df_rules["treatment"].map(adverse_event_map)
 
-    # 7. Europe PMC literature co-occurrence weights (symptom ↔ condition)
-    print("Fetching Europe PMC literature co-occurrence weights (symptom ↔ condition)...")
+    # 7. Europe PMC literature breakdown (symptom ↔ condition): articles + patents
+    print("Fetching Europe PMC literature breakdown (symptom ↔ condition)...")
     unique_sc_pairs = df_rules[["raw_symptom", "condition"]].drop_duplicates()
-    lit_weight_map = {}
+    sc_lit_map = {}
     for _, pair in unique_sc_pairs.iterrows():
-        lit_weight_map[(pair["raw_symptom"], pair["condition"])] = \
-            get_literature_cooccurrence(pair["raw_symptom"], pair["condition"])
-    df_rules["literature_weight"] = df_rules.apply(
-        lambda row: lit_weight_map.get((row["raw_symptom"], row["condition"]), 0), axis=1
+        sc_lit_map[(pair["raw_symptom"], pair["condition"])] = \
+            get_literature_breakdown(pair["raw_symptom"], pair["condition"])
+    df_rules["lit_articles"] = df_rules.apply(
+        lambda row: sc_lit_map.get((row["raw_symptom"], row["condition"]), {}).get("articles", 0), axis=1
+    )
+    df_rules["lit_patents"] = df_rules.apply(
+        lambda row: sc_lit_map.get((row["raw_symptom"], row["condition"]), {}).get("patents", 0), axis=1
     )
 
-    # 8. Europe PMC literature co-occurrence weights (condition ↔ test)
-    print("Fetching Europe PMC literature co-occurrence weights (condition ↔ test)...")
+    # 8. Europe PMC literature breakdown (condition ↔ test): articles + patents
+    print("Fetching Europe PMC literature breakdown (condition ↔ test)...")
     unique_ct_lit_pairs = df_rules[["condition", "test"]].drop_duplicates()
-    test_lit_weight_map = {}
+    ct_lit_map = {}
     for _, pair in unique_ct_lit_pairs.iterrows():
-        test_lit_weight_map[(pair["condition"], pair["test"])] = \
-            get_literature_cooccurrence(pair["condition"], pair["test"])
-    df_rules["test_literature_weight"] = df_rules.apply(
-        lambda row: test_lit_weight_map.get((row["condition"], row["test"]), 0), axis=1
+        ct_lit_map[(pair["condition"], pair["test"])] = \
+            get_literature_breakdown(pair["condition"], pair["test"])
+    df_rules["test_lit_articles"] = df_rules.apply(
+        lambda row: ct_lit_map.get((row["condition"], row["test"]), {}).get("articles", 0), axis=1
+    )
+    df_rules["test_lit_patents"] = df_rules.apply(
+        lambda row: ct_lit_map.get((row["condition"], row["test"]), {}).get("patents", 0), axis=1
     )
 
     # 9. ClinicalTrials.gov trial counts (condition ↔ treatment)

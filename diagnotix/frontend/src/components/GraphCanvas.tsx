@@ -149,6 +149,24 @@ function NodeTooltip({ node }: { node: FGNode }) {
         </div>
       )}
 
+      {/* ── Evidence counts (Condition nodes) ── */}
+      {typ === "Condition" && (
+        (node.literature_articles != null || node.literature_patents != null || node.trial_count != null)
+      ) && (
+        <div className="gt-section">
+          <div className="gt-label">Evidence</div>
+          {node.literature_articles != null && (
+            <div className="gt-row"><span>Articles</span><span>{node.literature_articles as number}</span></div>
+          )}
+          {node.literature_patents != null && (
+            <div className="gt-row"><span>Patents</span><span>{node.literature_patents as number}</span></div>
+          )}
+          {!!node.trial_count && (
+            <div className="gt-row"><span>Trials</span><span>{node.trial_count as number}</span></div>
+          )}
+        </div>
+      )}
+
       {/* ── Supporting documentation (Test nodes) ── */}
       {node.guideline_source && (
         <div className="gt-section">
