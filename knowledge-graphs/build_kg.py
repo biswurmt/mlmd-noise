@@ -1,4 +1,5 @@
 import json
+import time
 import requests
 import pandas as pd
 import networkx as nx
@@ -358,17 +359,28 @@ def get_literature_breakdown(term1, term2):
     base_url   = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
     base_query = f'({term1}) AND ({term2})'
 
-    def _count(extra_filter):
-        try:
-            r = requests.get(
-                base_url,
-                params={"query": f"{base_query} {extra_filter}", "format": "json", "pageSize": 1},
-            )
-            r.raise_for_status()
-            return r.json().get("hitCount", 0)
-        except Exception as e:
-            print(f"  Europe PMC error for ('{term1}', '{term2}'): {e}")
-            return 0
+    def _count(extra_filter, retries=3, backoff=2.0):
+        for attempt in range(retries):
+            try:
+                r = requests.get(
+                    base_url,
+                    params={"query": f"{base_query} {extra_filter}", "format": "json", "pageSize": 1},
+                    timeout=15,
+                )
+                r.raise_for_status()
+                return r.json().get("hitCount", 0)
+            except requests.exceptions.HTTPError as e:
+                if r.status_code in (503, 429, 502) and attempt < retries - 1:
+                    wait = backoff * (2 ** attempt)
+                    print(f"  Europe PMC {r.status_code} for ('{term1}', '{term2}') — retrying in {wait:.0f}s...")
+                    time.sleep(wait)
+                else:
+                    print(f"  Europe PMC error for ('{term1}', '{term2}'): {e}")
+                    return 0
+            except Exception as e:
+                print(f"  Europe PMC error for ('{term1}', '{term2}'): {e}")
+                return 0
+        return 0
 
     result = {
         "articles": _count("NOT SRC:PAT"),
