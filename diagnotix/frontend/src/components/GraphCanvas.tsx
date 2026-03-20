@@ -100,13 +100,14 @@ function parseCode(raw: string): { label: string; href: string | null } {
   return { label: raw, href: null };
 }
 
-function CodeRow({ prefix, raw }: { prefix: string; raw: string }) {
+function CodeRow({ prefix, raw, hrefOverride }: { prefix: string; raw: string; hrefOverride?: string }) {
   const { label, href } = parseCode(raw);
+  const finalHref = hrefOverride ?? href;
   return (
     <div className="gt-row">
       <span>{prefix}</span>
-      {href ? (
-        <a className="gt-code-link" href={href} target="_blank" rel="noreferrer">
+      {finalHref ? (
+        <a className="gt-code-link" href={finalHref} target="_blank" rel="noreferrer">
           <code>{label}</code> ↗
         </a>
       ) : (
@@ -131,8 +132,10 @@ function NodeTooltip({ node }: { node: FGNode }) {
         node.loinc_code || node.rxcui) && (
         <div className="gt-section">
           {node.ebi_open_code  && <CodeRow prefix="HP/MONDO"  raw={node.ebi_open_code  as string} />}
-          {node.snomed_ca_code && <CodeRow prefix="SNOMED-CT" raw={node.snomed_ca_code as string} />}
-          {node.icd10_code     && <CodeRow prefix="ICD-10"    raw={node.icd10_code     as string} />}
+          {node.snomed_ca_code && <CodeRow prefix="SNOMED-CT" raw={node.snomed_ca_code as string}
+            hrefOverride={`https://browser.ihtsdotools.org/?perspective=full&conceptId1=${node.snomed_ca_code}`} />}
+          {node.icd10_code     && <CodeRow prefix="ICD-10"    raw={node.icd10_code     as string}
+            hrefOverride={`https://icd.who.int/browse10/2019/en#/${parseCode(node.icd10_code as string).label}`} />}
           {node.loinc_code     && <CodeRow prefix="LOINC"     raw={node.loinc_code     as string} />}
           {node.rxcui          && <CodeRow prefix="RxCUI"     raw={node.rxcui          as string} />}
         </div>

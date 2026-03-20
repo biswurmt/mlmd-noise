@@ -161,21 +161,22 @@ def get_open_medical_concept(term):
     of alternative clinical terms for the concept.
     """
     base_uri = "https://www.ebi.ac.uk/ols4/api/search"
+    _VALID_OLS_PREFIXES = ("HP_", "MONDO_", "EFO_")
     params = {
         "q": term,
         "ontology": "hp,mondo,efo",
         "queryFields": "label,synonym",
         "exact": "false",
-        "rows": 1,
+        "rows": 5,
     }
     try:
         response = requests.get(base_uri, params=params)
         response.raise_for_status()
         docs = response.json().get("response", {}).get("docs", [])
-        if docs:
-            best = docs[0]
-            synonyms = best.get("synonym") or []
-            return best.get("label"), best.get("short_form"), synonyms
+        for doc in docs:
+            if doc.get("short_form", "").startswith(_VALID_OLS_PREFIXES):
+                synonyms = doc.get("synonym") or []
+                return doc.get("label"), doc.get("short_form"), synonyms
         return term, None, []
     except Exception as e:
         print(f"  EBI OLS API error for '{term}': {e}")
