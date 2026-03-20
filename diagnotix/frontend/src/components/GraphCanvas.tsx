@@ -177,7 +177,10 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
   const [dims, setDims]               = useState({ width: 800, height: 600 });
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
   const [hoveredNode, setHoveredNode]   = useState<FGNode | null>(null);
+  const [pinnedNode, setPinnedNode]     = useState<FGNode | null>(null);
   const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
+  const hideTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipHoveredRef = useRef(false);
 
   // ── Responsive container ────────────────────────────────────────────────────
   useEffect(() => {
@@ -247,8 +250,30 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
   }, [graphData]);
 
   // ── Hover tooltip ───────────────────────────────────────────────────────────
+  // When the mouse leaves a node, we delay hiding by 200 ms so the user has
+  // time to move onto the tooltip popup.  If the mouse enters the tooltip
+  // (tracked via tooltipHoveredRef) the hide is cancelled and the tooltip
+  // stays open until the mouse leaves it.
   const handleNodeHover = useCallback((node: FGNode | null) => {
-    setHoveredNode(node ?? null);
+    if (node) {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      setHoveredNode(node);
+      setPinnedNode(node);
+    } else {
+      hideTimerRef.current = setTimeout(() => {
+        if (!tooltipHoveredRef.current) setHoveredNode(null);
+      }, 200);
+    }
+  }, []);
+
+  const handleTooltipEnter = useCallback(() => {
+    tooltipHoveredRef.current = true;
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
+
+  const handleTooltipLeave = useCallback(() => {
+    tooltipHoveredRef.current = false;
+    setHoveredNode(null);
   }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -398,12 +423,19 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
       />
 
       {/* ── Hover tooltip overlay ─────────────────────────────────────────── */}
-      {hoveredNode && (
+      {(hoveredNode ?? pinnedNode) && (
         <div
           className="graph-tooltip-wrapper"
-          style={{ left: tooltipPos.x, top: tooltipPos.y }}
+          style={{
+            left:    tooltipPos.x,
+            top:     tooltipPos.y,
+            opacity: hoveredNode ? 1 : 0,
+            pointerEvents: hoveredNode ? "auto" : "none",
+          }}
+          onMouseEnter={handleTooltipEnter}
+          onMouseLeave={handleTooltipLeave}
         >
-          <NodeTooltip node={hoveredNode} />
+          <NodeTooltip node={(hoveredNode ?? pinnedNode)!} />
         </div>
       )}
     </div>

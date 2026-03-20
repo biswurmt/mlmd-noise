@@ -340,9 +340,9 @@ html, body, #root {
 /* ─── Graph node tooltip ──────────────────────────────────────────────────────── */
 .graph-tooltip-wrapper {
   position: absolute;
-  pointer-events: none;
   z-index: 20;
   max-width: 260px;
+  transition: opacity 0.08s ease;
 }
 
 .graph-tooltip {
