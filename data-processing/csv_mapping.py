@@ -38,23 +38,49 @@ _CLIENT = AzureOpenAI(
     api_version="2025-01-01-preview",
 )
 
+# Node-type prefix mapping (mirrors build_kg.py _NODE_PREFIX)
+_PREFIX_TO_TYPE = {
+    "Condition":   "Condition",
+    "Symptom":     "Symptom",
+    "Vital":       "Vital_Sign_Threshold",
+    "Demographic": "Demographic_Factor",
+    "Risk Factor": "Risk_Factor",
+    "Attribute":   "Clinical_Attribute",
+    "MOI":         "Mechanism_of_Injury",
+}
+
+# Edges that lead directly to a Test node
+_TEST_EDGES = {"REQUIRES_TEST", "DIRECTLY_INDICATES_TEST"}
+
 # ---------------------------------------------------------
 # 2. Semantic Matching Function
 # ---------------------------------------------------------
-def get_semantic_match(raw_diagnosis: str, valid_conditions: list) -> str:
-    """Uses Azure OpenAI to fuzzily match a raw diagnosis to a known graph condition."""
-    
+def get_semantic_matches(raw_diagnosis: str, available_nodes: list[dict]) -> list[dict]:
+    """Uses Azure OpenAI to return up to 3 high-confidence matches from the graph.
+
+    Each match is {"label": str, "node_type": str} where label is the node label
+    exactly as it appears in available_nodes.  Returns an empty list when no
+    reasonable match exists.
+    """
     system_prompt = (
-        "You are a clinical NLP assistant. Your job is to map a raw patient diagnosis "
-        "to the closest matching official condition from a provided list. "
-        "If there is no medically reasonable match, return null. "
-        "You must respond in strictly valid JSON format with a single key: 'matched_condition'."
+        "You are a clinical NLP assistant mapping raw patient diagnoses to nodes in a "
+        "medical knowledge graph. A node can be a Condition (named diagnosis), Symptom "
+        "(clinical finding), Vital_Sign_Threshold, Risk_Factor, Demographic_Factor, "
+        "Clinical_Attribute, or Mechanism_of_Injury.\n\n"
+        "For each candidate node, estimate your confidence (0–100) that it is clinically "
+        "relevant to the raw diagnosis. Return ALL nodes where your confidence is 85 or "
+        "above. There is no cap on the number of matches — return one, many, or none "
+        "depending on how many genuinely meet the threshold. "
+        "If no node reaches 85% confidence, return an empty array.\n\n"
+        "Respond in strictly valid JSON: "
+        "{\"matches\": [{\"label\": \"...\", \"node_type\": \"...\", \"confidence\": <int 0-100>}, ...]}"
     )
-    
+
     user_prompt = (
-        f"Raw Patient Diagnosis: '{raw_diagnosis}'\n"
-        f"Available Official Conditions: {json.dumps(valid_conditions)}\n\n"
-        "Return the closest matching Official Condition exactly as it appears in the list."
+        f"Raw Patient Diagnosis: '{raw_diagnosis}'\n\n"
+        f"Available Graph Nodes:\n{json.dumps(available_nodes, indent=2)}\n\n"
+        "Return each label exactly as it appears in the node list above. "
+        "Only include matches with confidence >= 85."
     )
 
     try:
@@ -66,17 +92,48 @@ def get_semantic_match(raw_diagnosis: str, valid_conditions: list) -> str:
             ],
             response_format={"type": "json_object"},
         )
-        
-        # Parse the JSON response
-        result_json = json.loads(response.choices[0].message.content)
-        return result_json.get("matched_condition")
-        
+        result = json.loads(response.choices[0].message.content)
+        matches = result.get("matches", [])
+        if not isinstance(matches, list):
+            return []
+        return [
+            m for m in matches
+            if isinstance(m, dict)
+            and "label" in m
+            and "node_type" in m
+            and int(m.get("confidence", 0)) >= 85
+        ]
     except Exception as e:
         print(f"  [!] LLM mapping failed for '{raw_diagnosis}': {e}")
-        return None
+        return []
+
 
 # ---------------------------------------------------------
-# 3. Main Processing Pipeline
+# 3. Graph Traversal Helper
+# ---------------------------------------------------------
+def get_tests_for_node(kg, label: str, node_type: str) -> list[str]:
+    """Return all Test node labels reachable from a graph node via test edges.
+
+    Conditions are connected via REQUIRES_TEST; all other node types are
+    connected via DIRECTLY_INDICATES_TEST.
+    """
+    # Reconstruct the full node ID from label + type
+    reverse_prefix = {v: k for k, v in _PREFIX_TO_TYPE.items()}
+    prefix = reverse_prefix.get(node_type, node_type)
+    node_id = f"{prefix}: {label}"
+
+    if node_id not in kg.nodes:
+        return []
+
+    tests = []
+    for _, target, edge_data in kg.out_edges(node_id, data=True):
+        if edge_data.get("relationship") in _TEST_EDGES:
+            tests.append(str(target).replace("Test: ", ""))
+    return tests
+
+
+# ---------------------------------------------------------
+# 4. Main Processing Pipeline
 # ---------------------------------------------------------
 def map_diagnoses_with_llm(
     csv_input_path: str,
@@ -84,62 +141,78 @@ def map_diagnoses_with_llm(
     csv_output_path: str,
     row_limit: int | None = None,
 ):
-    # --- Load Graph & Extract Valid Conditions ---
+    # --- Load Graph & Build Node Catalogue ---
     print("Loading Knowledge Graph...")
     with open(graph_pkl_path, "rb") as f:
         kg = pickle.load(f)
 
-    # Extract all nodes that start with "Condition: " and strip the prefix
-    available_conditions = [
-        node.replace("Condition: ", "")
-        for node in kg.nodes
-        if str(node).startswith("Condition: ")
-    ]
-    print(f"Found {len(available_conditions)} unique conditions in the graph.")
+    # Build a catalogue of all matchable nodes: conditions + clinical finding types
+    available_nodes: list[dict] = []
+    for node_id, attrs in kg.nodes(data=True):
+        node_str = str(node_id)
+        for prefix, node_type in _PREFIX_TO_TYPE.items():
+            if node_str.startswith(f"{prefix}: "):
+                label = node_str[len(prefix) + 2:]
+                available_nodes.append({"label": label, "node_type": node_type})
+                break
 
-    # --- Load CSV & Find Unique Raw Diagnoses ---
+    cond_count = sum(1 for n in available_nodes if n["node_type"] == "Condition")
+    symp_count = sum(1 for n in available_nodes if n["node_type"] != "Condition")
+    print(f"Graph catalogue: {cond_count} conditions, {symp_count} clinical finding nodes.")
+
+    # --- Load CSV ---
     df = pd.read_csv(csv_input_path)
     print(list(df.columns))
     if 'dx' not in df.columns:
-        raise ValueError("CSV must contain a 'diagnosis' column.")
+        raise ValueError("CSV must contain a 'dx' column.")
 
     if row_limit is not None:
         print(f"  [--limit] Restricting to first {row_limit} rows for testing.")
         df = df.head(row_limit)
 
     unique_raw_diagnoses = df['dx'].dropna().unique()
-    print(f"Found {len(unique_raw_diagnoses)} unique raw diagnoses in the CSV to map.")
+    print(f"Found {len(unique_raw_diagnoses)} unique raw diagnoses to map.")
 
     # --- Perform LLM Mapping ---
     print("Starting Azure OpenAI semantic matching...")
-    mapping_dictionary = {}
-    
+    # mapping_dictionary: dx → list of {"label": ..., "node_type": ..., "tests": [...]}
+    mapping_dictionary: dict[str, list[dict]] = {}
+
     for raw_diag in unique_raw_diagnoses:
-        match = get_semantic_match(raw_diag, available_conditions)
-        mapping_dictionary[raw_diag] = match
-        print(f"  Mapped: '{raw_diag}' -> '{match}'")
+        matches = get_semantic_matches(raw_diag, available_nodes)
+        enriched = []
+        for m in matches:
+            tests = get_tests_for_node(kg, m["label"], m["node_type"])
+            enriched.append({**m, "tests": tests})
+        mapping_dictionary[raw_diag] = enriched
+        labels = " | ".join(
+            f"{m['label']} ({m['node_type']}, {m.get('confidence', '?')}%)"
+            for m in enriched
+        ) or "no match"
+        print(f"  '{raw_diag}' -> {labels}")
 
     # --- Map Results Back to DataFrame ---
-    # Create a new column for the matched condition
-    df['matched_graph_condition'] = df['dx'].map(mapping_dictionary)
+    def format_matched_nodes(matches: list[dict]) -> str:
+        if not matches:
+            return ""
+        return " | ".join(f"{m['label']} ({m['node_type']})" for m in matches)
 
-    # --- Traverse Graph for Tests ---
-    print("Extracting required tests from graph...")
-    def get_tests_for_condition(matched_condition):
-        if not matched_condition:
-            return "No match found"
-            
-        node_name = f"Condition: {matched_condition}"
-        tests = []
-        
-        if node_name in kg.nodes:
-            for _, target_node, edge_data in kg.out_edges(node_name, data=True):
-                if edge_data.get('relationship') == 'REQUIRES_TEST':
-                    tests.append(target_node.replace("Test: ", ""))
-                    
+    def format_potential_tests(matches: list[dict]) -> str:
+        seen: set[str] = set()
+        tests: list[str] = []
+        for m in matches:
+            for t in m.get("tests", []):
+                if t not in seen:
+                    seen.add(t)
+                    tests.append(t)
         return ", ".join(tests) if tests else "No linked tests found"
 
-    df['potential_tests'] = df['matched_graph_condition'].apply(get_tests_for_condition)
+    df['matched_graph_nodes'] = df['dx'].map(
+        lambda dx: format_matched_nodes(mapping_dictionary.get(dx, []))
+    )
+    df['potential_tests'] = df['dx'].map(
+        lambda dx: format_potential_tests(mapping_dictionary.get(dx, []))
+    )
 
     # --- Save Output ---
     df.to_csv(csv_output_path, index=False)
@@ -182,4 +255,4 @@ if __name__ == "__main__":
     )
 
     print("\n--- Output Preview ---")
-    print(result_df[['dx', 'potential_tests']].head())
+    print(result_df[['dx', 'matched_graph_nodes', 'potential_tests']].head())
