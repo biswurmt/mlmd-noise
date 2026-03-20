@@ -179,8 +179,9 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
   const [hoveredNode, setHoveredNode]   = useState<FGNode | null>(null);
   const [pinnedNode, setPinnedNode]     = useState<FGNode | null>(null);
   const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
-  const hideTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipHoveredRef = useRef(false);
+  const positionFrozenRef = useRef(false);
 
   // ── Responsive container ────────────────────────────────────────────────────
   useEffect(() => {
@@ -256,10 +257,12 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
   // stays open until the mouse leaves it.
   const handleNodeHover = useCallback((node: FGNode | null) => {
     if (node) {
+      positionFrozenRef.current = false;
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       setHoveredNode(node);
       setPinnedNode(node);
     } else {
+      positionFrozenRef.current = true; // freeze tooltip position so it doesn't chase the cursor
       hideTimerRef.current = setTimeout(() => {
         if (!tooltipHoveredRef.current) setHoveredNode(null);
       }, 200);
@@ -277,6 +280,7 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
   }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (positionFrozenRef.current) return;
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTooltipPos({ x: e.clientX - rect.left + 16, y: e.clientY - rect.top + 16 });
