@@ -227,6 +227,7 @@ export default function App() {
                   nodes={visibleNodes}
                   edges={visibleEdges}
                   newNodeIds={newNodeIds}
+                  activePathway={selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : null}
                 />
               )}
               {graphLoading && (

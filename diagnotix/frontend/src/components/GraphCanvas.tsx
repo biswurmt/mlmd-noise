@@ -43,9 +43,10 @@ interface FGLink extends Record<string, unknown> {
 }
 
 interface Props {
-  nodes:      GraphNode[];
-  edges:      GraphEdge[];
-  newNodeIds: Set<string>;
+  nodes:          GraphNode[];
+  edges:          GraphEdge[];
+  newNodeIds:     Set<string>;
+  activePathway?: string | null;
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ function CodeRow({ prefix, raw, hrefOverride }: { prefix: string; raw: string; h
   );
 }
 
-function NodeTooltip({ node }: { node: FGNode }) {
+function NodeTooltip({ node, activePathway }: { node: FGNode; activePathway?: string | null }) {
   const typ      = node.node_type ?? node.type;
   const label    = String(node.id).replace(/^[^:]+:\s*/, "");
   const syns     = Array.isArray(node.synonyms) ? node.synonyms as string[] : [];
@@ -151,9 +152,12 @@ function NodeTooltip({ node }: { node: FGNode }) {
 
       {/* ── Evidence counts (Condition + clinical finding nodes) ── */}
       {(() => {
-        const evidence = Array.isArray(node.test_evidence)
+        const all = Array.isArray(node.test_evidence)
           ? node.test_evidence as { test: string; articles?: number; patents?: number }[]
           : [];
+        const evidence = activePathway
+          ? all.filter(e => e.test === activePathway)
+          : all;
         const trials = typ === "Condition" ? node.trial_count as number | undefined : undefined;
         if (evidence.length === 0 && !trials) return null;
         return (
@@ -204,7 +208,7 @@ function NodeTooltip({ node }: { node: FGNode }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
+export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef        = useRef<ForceGraphMethods<FGNode, FGLink>>();
   const [dims, setDims]               = useState({ width: 800, height: 600 });
@@ -452,7 +456,7 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
           className="graph-tooltip-wrapper"
           style={{ left: tooltipPos.x, top: tooltipPos.y, pointerEvents: "none" }}
         >
-          <NodeTooltip node={hoveredNode} />
+          <NodeTooltip node={hoveredNode} activePathway={activePathway} />
         </div>
       )}
 
@@ -463,7 +467,7 @@ export default function GraphCanvas({ nodes, edges, newNodeIds }: Props) {
           style={{ left: pinnedPos.x, top: pinnedPos.y, pointerEvents: "auto" }}
           onMouseLeave={handleTooltipLeave}
         >
-          <NodeTooltip node={pinnedNode} />
+          <NodeTooltip node={pinnedNode} activePathway={activePathway} />
         </div>
       )}
     </div>
