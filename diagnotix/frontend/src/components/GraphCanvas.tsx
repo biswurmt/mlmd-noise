@@ -135,7 +135,7 @@ function NodeTooltip({ node }: { node: FGNode }) {
           {node.snomed_ca_code && <CodeRow prefix="SNOMED-CT" raw={node.snomed_ca_code as string}
             hrefOverride={`https://browser.ihtsdotools.org/?perspective=full&conceptId1=${node.snomed_ca_code}`} />}
           {node.icd10_code     && <CodeRow prefix="ICD-10"    raw={node.icd10_code     as string}
-            hrefOverride={`https://icd.who.int/browse10/2019/en#/${parseCode(node.icd10_code as string).label}`} />}
+            hrefOverride={`https://icd.who.int/browse10/2026/en#/${parseCode(node.icd10_code as string).label}`} />}
           {node.loinc_code     && <CodeRow prefix="LOINC"     raw={node.loinc_code     as string} />}
           {node.rxcui          && <CodeRow prefix="RxCUI"     raw={node.rxcui          as string} />}
         </div>
@@ -149,12 +149,12 @@ function NodeTooltip({ node }: { node: FGNode }) {
         </div>
       )}
 
-      {/* ── Evidence counts (Condition nodes) ── */}
-      {typ === "Condition" && (() => {
+      {/* ── Evidence counts (Condition + clinical finding nodes) ── */}
+      {(() => {
         const evidence = Array.isArray(node.test_evidence)
           ? node.test_evidence as { test: string; articles?: number; patents?: number }[]
           : [];
-        const trials = node.trial_count as number | undefined;
+        const trials = typ === "Condition" ? node.trial_count as number | undefined : undefined;
         if (evidence.length === 0 && !trials) return null;
         return (
           <div className="gt-section">

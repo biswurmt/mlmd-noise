@@ -511,32 +511,50 @@ def build_unified_medical_kg(df):
                 G.add_edge(treatment_node, adverse_event_node,
                            relationship="HAS_ADVERSE_EVENT")
 
-    # Attach per-test evidence onto each Condition node so the frontend can
-    # label counts as "co-occurrence with <Test>" rather than anonymous totals.
-    # Uses the outgoing REQUIRES_TEST edges, which carry the condition↔test
-    # literature counts collected in step 8.
+    # Attach per-test evidence onto Condition nodes (REQUIRES_TEST edges, step 8)
+    # and onto clinical-finding nodes (DIRECTLY_INDICATES_TEST edges, step 9)
+    # so the frontend can label counts as "co-occurrence with <Test>".
+    _FINDING_TYPES = {
+        "Symptom", "Vital_Sign_Threshold", "Demographic_Factor",
+        "Risk_Factor", "Clinical_Attribute", "Mechanism_of_Injury",
+    }
+
     for node, attrs in list(G.nodes(data=True)):
-        if attrs.get("type") != "Condition":
-            continue
-        test_evidence = []
-        for _, tgt, d in G.out_edges(node, data=True):
-            if d.get("relationship") != "REQUIRES_TEST":
-                continue
-            test_label = str(tgt).replace("Test: ", "")
-            entry = {"test": test_label}
-            if d.get("literature_articles") is not None:
-                entry["articles"] = int(d["literature_articles"] or 0)
-            if d.get("literature_patents") is not None:
-                entry["patents"] = int(d["literature_patents"] or 0)
-            test_evidence.append(entry)
-        # Trial counts come from outgoing RECOMMENDS_TREATMENT edges
-        trials = sum(
-            d.get("trial_count") or 0
-            for _, _, d in G.out_edges(node, data=True)
-            if d.get("relationship") == "RECOMMENDS_TREATMENT"
-        )
-        G.nodes[node]["test_evidence"] = test_evidence
-        G.nodes[node]["trial_count"]   = trials
+        node_type = attrs.get("type")
+
+        if node_type == "Condition":
+            test_evidence = []
+            for _, tgt, d in G.out_edges(node, data=True):
+                if d.get("relationship") != "REQUIRES_TEST":
+                    continue
+                test_label = str(tgt).replace("Test: ", "")
+                entry = {"test": test_label}
+                if d.get("literature_articles") is not None:
+                    entry["articles"] = int(d["literature_articles"] or 0)
+                if d.get("literature_patents") is not None:
+                    entry["patents"] = int(d["literature_patents"] or 0)
+                test_evidence.append(entry)
+            trials = sum(
+                d.get("trial_count") or 0
+                for _, _, d in G.out_edges(node, data=True)
+                if d.get("relationship") == "RECOMMENDS_TREATMENT"
+            )
+            G.nodes[node]["test_evidence"] = test_evidence
+            G.nodes[node]["trial_count"]   = trials
+
+        elif node_type in _FINDING_TYPES:
+            test_evidence = []
+            for _, tgt, d in G.out_edges(node, data=True):
+                if d.get("relationship") != "DIRECTLY_INDICATES_TEST":
+                    continue
+                test_label = str(tgt).replace("Test: ", "")
+                entry = {"test": test_label}
+                if d.get("literature_articles") is not None:
+                    entry["articles"] = int(d["literature_articles"] or 0)
+                if d.get("literature_patents") is not None:
+                    entry["patents"] = int(d["literature_patents"] or 0)
+                test_evidence.append(entry)
+            G.nodes[node]["test_evidence"] = test_evidence
 
     return G
 
