@@ -505,6 +505,59 @@ def _normalise_rule(rule: dict) -> tuple[dict, list[str]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Shared grounded verification pass (used by generation pipelines)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_grounded_verify_pass(rules: list[dict], test_name: str) -> list[dict]:
+    """Run one normalise → evidence-gather → grounded-verify pass on a rule set.
+
+    Intended to be imported by generation pipelines (kg_service.py,
+    kg_enrichment_pipeline.py) so that every rule written to
+    guideline_rules.json has passed the same PMC-evidence-aware clinical review
+    used by the standalone audit_guidelines CLI.
+
+    Steps:
+      1. Normalise condition/symptom strings via ICD-10-CM (NLM) and HP/MONDO
+         (EMBL-EBI OLS4) so the LLM reviewer sees canonical clinical names.
+      2. Gather PMC co-occurrence counts and DuckDuckGo snippets per rule via
+         _gather_evidence — results are cached in memory and persisted to the
+         grounding checkpoint so repeated calls are cheap.
+      3. Call _verify_group with the populated evidence_map so the LLM reviewer
+         receives PMC tier guidance (STRONG/GOOD/MODERATE/LIMITED/NONE) before
+         deciding whether to retain or drop each rule.
+
+    Args:
+        rules:     A list of schema-valid rule dicts (raw_symptom, node_type,
+                   condition, test, source all present).
+        test_name: The diagnostic test name — passed to the LLM reviewer prompt.
+
+    Returns:
+        The subset of rules that passed all three verification criteria.
+    """
+    if not rules:
+        return rules
+
+    _load_grounding_checkpoint()
+
+    # Step 1: normalise
+    normalised: list[dict] = []
+    for rule in rules:
+        updated, changes = _normalise_rule(rule)
+        if changes:
+            for c in changes:
+                print(f"  [normalise] {c}")
+        normalised.append(updated)
+
+    # Step 2: gather evidence
+    evidence_map: dict[int, dict] = {}
+    for i, rule in enumerate(normalised):
+        evidence_map[i] = _gather_evidence(rule)
+
+    # Step 3: grounded verify
+    return _verify_group(normalised, test_name, evidence_map=evidence_map)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main audit pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 

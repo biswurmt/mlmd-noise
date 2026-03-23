@@ -53,6 +53,7 @@ if _KG_DIR not in sys.path:
     sys.path.insert(0, _KG_DIR)
 
 from build_kg import generate_knowledge_graph  # noqa: E402
+from audit_guidelines import run_grounded_verify_pass  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Environment — try data-processing/.env first, fall back to knowledge-graphs/.env
@@ -307,12 +308,40 @@ def enrich_guideline_rules(
             print(f"FAILED ({exc})")
             added_counts[test] = 0
             continue
+        print(f"{len(rules)} generated.")
+
+        # Iterative grounded verify loop — normalise + PMC evidence + LLM review
+        _MAX_VERIFY_ITERATIONS = 3
+        current_rules = rules
+        for iteration in range(1, _MAX_VERIFY_ITERATIONS + 1):
+            print(f"  [verify] Iteration {iteration}/{_MAX_VERIFY_ITERATIONS}: "
+                  f"{len(current_rules)} candidate rule(s)…")
+            survived = run_grounded_verify_pass(current_rules, test)
+            dropped = len(current_rules) - len(survived)
+            if dropped == 0:
+                print(f"  [verify] Converged after {iteration} iteration(s).")
+                current_rules = survived
+                break
+            print(f"  [verify] {dropped} rule(s) dropped.")
+            if iteration < _MAX_VERIFY_ITERATIONS and survived:
+                try:
+                    replacements = _generate_rules_for_test(test)
+                    current_rules = survived + replacements
+                except Exception:
+                    current_rules = survived
+            else:
+                current_rules = survived
+
+        if not current_rules:
+            print(f"  [skip] All rules for '{test}' removed during verification — skipping.")
+            added_counts[test] = 0
+            continue
 
         existing.append({"_comment": f"PATHWAY: {test} — LLM-generated via kg_enrichment_pipeline"})
-        existing.extend(rules)
+        existing.extend(current_rules)
         existing_tests.add(test)
-        added_counts[test] = len(rules)
-        print(f"{len(rules)} rules added.")
+        added_counts[test] = len(current_rules)
+        print(f"  [done] {len(current_rules)} rule(s) committed for '{test}'.")
 
     with open(rules_json_path, "w") as f:
         json.dump(existing, f, indent=2)

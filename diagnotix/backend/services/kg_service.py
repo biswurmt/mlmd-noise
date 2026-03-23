@@ -32,7 +32,7 @@ if _KG_DIR not in sys.path:
     sys.path.insert(0, _KG_DIR)
 
 from build_kg import generate_knowledge_graph  # noqa: E402
-from audit_guidelines import _normalise_rule  # noqa: E402
+from audit_guidelines import _normalise_rule, run_grounded_verify_pass  # noqa: E402
 
 _RULES_FILE = os.path.join(_KG_DIR, "guideline_rules.json")
 
@@ -321,18 +321,9 @@ def _verify_and_converge(
         print(f"  [loop] Iteration {iteration}/{max_iterations}: "
               f"{len(current_rules)} candidate rule(s).")
 
-        # Step 1: Normalise names before the LLM reviewer sees them
-        normalised: list[dict] = []
-        for rule in current_rules:
-            updated, changes = _normalise_rule(rule)
-            if changes:
-                for c in changes:
-                    print(f"    [normalise] {c}")
-            normalised.append(updated)
-
-        # Step 2: LLM verification pass
-        survived = _verify_rules(normalised, diagnostic_test)
-        dropped_count = len(normalised) - len(survived)
+        # Steps 1-2: Normalise + gather PMC/web evidence + grounded LLM verify
+        survived = run_grounded_verify_pass(current_rules, diagnostic_test)
+        dropped_count = len(current_rules) - len(survived)
 
         if dropped_count == 0:
             print(f"  [loop] Converged after {iteration} iteration(s) — "
@@ -349,7 +340,7 @@ def _verify_and_converge(
             }
             dropped_pairs = [
                 {"condition": r["condition"], "node_type": r["node_type"]}
-                for r in normalised
+                for r in current_rules
                 if (r["condition"].strip().lower(), r["node_type"].strip().lower())
                 not in survived_keys
             ]
