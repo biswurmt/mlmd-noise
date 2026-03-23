@@ -16,11 +16,14 @@ Retroactively audits guideline_rules.json in two passes:
 
 Usage
 -----
-  python audit_guidelines.py                     # verify + normalise, write in-place
-  python audit_guidelines.py --dry-run           # report only, no file changes
-  python audit_guidelines.py --skip-verify       # normalise names only
-  python audit_guidelines.py --skip-normalise    # verify only
+  python audit_guidelines.py                                    # verify + normalise, write in-place
+  python audit_guidelines.py --dry-run                         # report only, no file changes
+  python audit_guidelines.py --skip-verify                     # normalise names only
+  python audit_guidelines.py --skip-normalise                  # verify only
   python audit_guidelines.py --rules-json /path/to/guideline_rules.json
+  python audit_guidelines.py --grounding                       # Pass 0: PMC + web grounding before LLM review
+  python audit_guidelines.py --grounding --flag-low-evidence   # also writes flagged_rules.json
+  python audit_guidelines.py --grounding --dry-run             # grounding report only
 """
 
 import argparse
@@ -32,6 +35,7 @@ import time
 
 import requests
 from azure.identity import AzureCliCredential, get_bearer_token_provider
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
@@ -93,16 +97,62 @@ VALID_SOURCES = {
 }
 
 
-def _verify_group(rules: list[dict], test_name: str) -> list[dict]:
-    """Send one pathway's rules to the LLM for clinical review.  Returns the surviving subset."""
+def _verify_group(
+    rules: list[dict],
+    test_name: str,
+    evidence_map: dict[int, dict] | None = None,
+) -> list[dict]:
+    """Send one pathway's rules to the LLM for clinical review.  Returns the surviving subset.
+
+    Args:
+        rules:        Rules for a single diagnostic test pathway.
+        test_name:    The diagnostic test name (used in the prompt).
+        evidence_map: Optional dict keyed by rule index (0-based within `rules`).
+                      Each value is the dict returned by _gather_evidence().
+                      When provided, PMC counts and web snippets are appended to
+                      the user message and a guidance prefix is added to the system
+                      prompt so the LLM can use the evidence in its review.
+    """
+    # Build optional evidence block to append to the user message
+    evidence_block = ""
+    system_prefix  = ""
+    if evidence_map:
+        lines = ["\n\n[EVIDENCE — use to inform criteria 1 and 2]"]
+        for i, rule in enumerate(rules):
+            ev = evidence_map.get(i)
+            if ev is None:
+                continue
+            label = f"Rule {i + 1} ({rule['condition']} → {rule['test']})"
+            lines.append(f"\n{label}:")
+            lines.append(f"  Europe PMC co-occurrence: {ev['pmc_articles']} articles, "
+                         f"{ev['pmc_patents']} patents")
+            lines.append(f"  Web search query: \"{ev['ddg_query']}\"")
+            if ev["ddg_snippets"]:
+                lines.append(f"  Web snippets ({len(ev['ddg_snippets'])} found):")
+                for snippet in ev["ddg_snippets"]:
+                    lines.append(f"    - {snippet}")
+            else:
+                lines.append("  Web snippets: none found")
+        lines.append("\n[/EVIDENCE]")
+        evidence_block = "\n".join(lines)
+
+        system_prefix = (
+            "An [EVIDENCE] block is appended after the rules. "
+            "Use it to inform criteria 1 (SOURCE accuracy) and 2 (CLINICAL plausibility). "
+            "High PMC article counts and on-topic web snippets increase confidence in a rule. "
+            "Zero counts on both signals should increase your scrutiny. "
+            "The evidence is advisory — your clinical judgement governs the final decision.\n\n"
+        )
+
     try:
         response = _CLIENT.chat.completions.create(
             model=_deployment,
             messages=[
-                {"role": "system", "content": VERIFICATION_PROMPT},
+                {"role": "system", "content": system_prefix + VERIFICATION_PROMPT},
                 {"role": "user", "content": (
                     f'Diagnostic test under review: "{test_name}"\n\n'
                     f"Rules to verify:\n{json.dumps(rules, indent=2)}"
+                    + evidence_block
                 )},
             ],
         )
@@ -136,6 +186,152 @@ _VALID_OLS_PREFIXES = ("HP_", "MONDO_", "EFO_")
 _nlm_cache:  dict = {}
 _ols_cache:  dict = {}
 
+# ── Grounding caches & checkpoint ─────────────────────────────────────────────
+_pmc_grounding_cache: dict = {}   # (condition.lower(), test.lower()) → {"articles": int, "patents": int}
+_ddg_grounding_cache: dict = {}   # query_str.lower() → list[str]
+_GROUNDING_CHECKPOINT_PATH = os.path.join(_THIS_DIR, ".audit_grounding_cache.json")
+
+
+def _load_grounding_checkpoint() -> None:
+    """Populate in-memory grounding caches from the sidecar checkpoint file."""
+    if not os.path.exists(_GROUNDING_CHECKPOINT_PATH):
+        return
+    try:
+        with open(_GROUNDING_CHECKPOINT_PATH, "r") as f:
+            data = json.load(f)
+        for key, value in data.items():
+            if key.startswith("pmc:"):
+                parts = key[4:].split("|", 1)
+                if len(parts) == 2:
+                    _pmc_grounding_cache[(parts[0], parts[1])] = value
+            elif key.startswith("ddg:"):
+                _ddg_grounding_cache[key[4:]] = value
+        print(f"  [grounding] Resumed from checkpoint ({len(data)} cached entries).")
+    except Exception:
+        pass  # corrupt checkpoint — start fresh
+
+
+def _save_grounding_checkpoint() -> None:
+    """Persist grounding caches to the sidecar checkpoint file."""
+    try:
+        data = {}
+        for (condition, test), value in _pmc_grounding_cache.items():
+            data[f"pmc:{condition}|{test}"] = value
+        for query, snippets in _ddg_grounding_cache.items():
+            data[f"ddg:{query}"] = snippets
+        with open(_GROUNDING_CHECKPOINT_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass  # never crash the audit over a checkpoint write failure
+
+
+def _pmc_cooccurrence(condition: str, test: str) -> dict:
+    """Return Europe PMC co-occurrence counts for a (condition, test) pair.
+
+    Returns {"articles": int, "patents": int}.  Uses the same retry/backoff
+    pattern as build_kg.get_literature_breakdown — reimplemented here to avoid
+    importing build_kg.py (which runs top-level setup code on import).
+    """
+    key = (condition.lower(), test.lower())
+    if key in _pmc_grounding_cache:
+        return _pmc_grounding_cache[key]
+
+    base_url   = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+    base_query = f"({condition}) AND ({test})"
+
+    def _count(extra_filter: str, retries: int = 3, backoff: float = 2.0) -> int:
+        for attempt in range(retries):
+            try:
+                r = requests.get(
+                    base_url,
+                    params={"query": f"{base_query} {extra_filter}",
+                            "format": "json", "pageSize": 1},
+                    timeout=15,
+                )
+                r.raise_for_status()
+                return r.json().get("hitCount", 0)
+            except requests.exceptions.HTTPError:
+                if r.status_code in (503, 429, 502) and attempt < retries - 1:
+                    wait = backoff * (2 ** attempt)
+                    print(f"    [pmc] {r.status_code} for '{condition}' + '{test}' — retry in {wait:.0f}s")
+                    time.sleep(wait)
+                else:
+                    return 0
+            except Exception:
+                return 0
+        return 0
+
+    result = {"articles": _count("NOT SRC:PAT"), "patents": _count("SRC:PAT")}
+    _pmc_grounding_cache[key] = result
+    _save_grounding_checkpoint()
+    return result
+
+
+def _ddg_web_search(query: str) -> list[str]:
+    """Query DuckDuckGo (no API key required) and return up to 5 result snippets."""
+    key = query.lower().strip()
+    if key in _ddg_grounding_cache:
+        return _ddg_grounding_cache[key]
+
+    snippets: list[str] = []
+    try:
+        resp = requests.post(
+            "https://html.duckduckgo.com/html/",
+            data={"q": query},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; audit_guidelines/1.0)"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            elements = soup.select(".result__snippet")
+            if elements:
+                snippets = [el.get_text(strip=True) for el in elements[:5]]
+            else:
+                # Fallback: use link text if snippets selector missed
+                snippets = [
+                    a.get_text(strip=True)
+                    for a in soup.select(".result__a")[:5]
+                ]
+        time.sleep(1.0)  # avoid rate-limiting
+    except Exception as exc:
+        print(f"    [ddg] Search failed for query '{query[:60]}...': {exc}")
+
+    _ddg_grounding_cache[key] = snippets
+    _save_grounding_checkpoint()
+    return snippets
+
+
+def _gather_evidence(rule: dict) -> dict:
+    """Fetch PMC co-occurrence and DuckDuckGo snippets for a single rule.
+
+    Returns:
+        {
+            "pmc_articles": int,
+            "pmc_patents":  int,
+            "ddg_snippets": list[str],
+            "ddg_query":    str,
+        }
+    """
+    condition = rule["condition"]
+    test      = rule["test"]
+    source    = rule["source"]
+
+    pmc = _pmc_cooccurrence(condition, test)
+    ddg_query = f'"{source}" guidelines {condition} {test} recommendation'
+    snippets  = _ddg_web_search(ddg_query)
+
+    return {
+        "pmc_articles": pmc["articles"],
+        "pmc_patents":  pmc["patents"],
+        "ddg_snippets": snippets,
+        "ddg_query":    ddg_query,
+    }
+
+
+def _is_low_evidence(evidence: dict) -> bool:
+    """Return True when a rule has zero PMC articles AND zero web snippets."""
+    return evidence["pmc_articles"] == 0 and len(evidence["ddg_snippets"]) == 0
+
 
 def _icd10_canonical_name(term: str) -> str | None:
     """Return the ICD-10-CM canonical description for term, or None."""
@@ -158,10 +354,20 @@ def _icd10_canonical_name(term: str) -> str | None:
 
 
 def _hp_mondo_canonical_label(term: str) -> str | None:
-    """Return the HP/MONDO canonical label for term, or None."""
+    """Return the HP/MONDO canonical label for term, or None.
+
+    A candidate label is only accepted when it meets two quality checks:
+      1. At least 2 words — rejects single-word generic matches like "right".
+      2. At least one meaningful word (> 3 chars) from the original term appears
+         in the candidate — ensures topical relevance.
+    """
     key = term.lower()
     if key in _ols_cache:
         return _ols_cache[key]
+
+    # Meaningful words from the original term (length > 3, lower-cased)
+    original_words = {w for w in re.split(r"\W+", term.lower()) if len(w) > 3}
+
     try:
         r = requests.get(
             "https://www.ebi.ac.uk/ols4/api/search",
@@ -173,9 +379,17 @@ def _hp_mondo_canonical_label(term: str) -> str | None:
         docs = r.json().get("response", {}).get("docs", [])
         label = None
         for doc in docs:
-            if doc.get("short_form", "").startswith(_VALID_OLS_PREFIXES):
-                label = doc.get("label")
-                break
+            if not doc.get("short_form", "").startswith(_VALID_OLS_PREFIXES):
+                continue
+            candidate = doc.get("label", "")
+            candidate_words = set(re.split(r"\W+", candidate.lower()))
+            # Reject single-word or non-overlapping candidates
+            if len(candidate.split()) < 2:
+                continue
+            if original_words and not original_words.intersection(candidate_words):
+                continue
+            label = candidate
+            break
     except Exception:
         label = None
     _ols_cache[key] = label
@@ -208,7 +422,14 @@ def _normalise_rule(rule: dict) -> tuple[dict, list[str]]:
 # Main audit pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 
-def audit(rules_json_path: str, dry_run: bool, skip_verify: bool, skip_normalise: bool):
+def audit(
+    rules_json_path: str,
+    dry_run: bool,
+    skip_verify: bool,
+    skip_normalise: bool,
+    grounding: bool = False,
+    flag_low_evidence: bool = False,
+):
     with open(rules_json_path, "r") as f:
         raw = json.load(f)
 
@@ -218,7 +439,7 @@ def audit(rules_json_path: str, dry_run: bool, skip_verify: bool, skip_normalise
 
     print(f"Loaded {len(rules)} rules across {len(comments)} pathway(s) from '{rules_json_path}'.")
 
-    # ── Pass 1: Schema pre-filter ─────────────────────────────────────────────
+    # ── Schema pre-filter ─────────────────────────────────────────────────────
     schema_ok = []
     schema_dropped = 0
     for rule in rules:
@@ -232,24 +453,72 @@ def audit(rules_json_path: str, dry_run: bool, skip_verify: bool, skip_normalise
         schema_ok.append(rule)
     print(f"\nSchema pre-filter: {len(schema_ok)} passed, {schema_dropped} dropped.\n")
 
-    # ── Pass 2: LLM verification grouped by test ──────────────────────────────
-    verified_rules = schema_ok
+    # ── Pass 0: Evidence Grounding ────────────────────────────────────────────
+    evidence_by_rule: dict[int, dict] = {}
+    flagged_rules: list[dict] = []
+    rules_for_verification = schema_ok
+
+    if grounding:
+        _load_grounding_checkpoint()
+        print("=== Pass 0: Evidence Grounding ===")
+        low_evidence_indices: set[int] = set()
+
+        for i, rule in enumerate(schema_ok):
+            label = f"{rule['condition']} → {rule['test']}"
+            print(f"  [{i + 1}/{len(schema_ok)}] {label}")
+            ev = _gather_evidence(rule)
+            evidence_by_rule[i] = ev
+            print(f"    PMC: {ev['pmc_articles']} articles, {ev['pmc_patents']} patents"
+                  f" | web snippets: {len(ev['ddg_snippets'])}")
+            if flag_low_evidence and _is_low_evidence(ev):
+                low_evidence_indices.add(i)
+
+        if flag_low_evidence and low_evidence_indices:
+            flagged_rules = [schema_ok[i] for i in sorted(low_evidence_indices)]
+            surviving_indices = [i for i in range(len(schema_ok)) if i not in low_evidence_indices]
+            rules_for_verification = [schema_ok[i] for i in surviving_indices]
+            # Re-index evidence_by_rule to match the new positions in rules_for_verification
+            evidence_by_rule = {
+                new_i: evidence_by_rule[old_i]
+                for new_i, old_i in enumerate(surviving_indices)
+            }
+            print(f"\nEvidence grounding complete: {len(flagged_rules)} rule(s) flagged "
+                  f"(zero PMC articles and zero web snippets), "
+                  f"{len(rules_for_verification)} proceeding to verification.\n")
+        else:
+            rules_for_verification = schema_ok
+            print(f"\nEvidence grounding complete: {len(schema_ok)} rules annotated.\n")
+
+    # ── Pass 1: LLM verification grouped by test ──────────────────────────────
+    verified_rules = rules_for_verification
     if not skip_verify:
         print("=== Pass 1: LLM Verification ===")
         by_test: dict[str, list[dict]] = {}
-        for rule in schema_ok:
+        for rule in rules_for_verification:
             by_test.setdefault(rule["test"], []).append(rule)
+
+        # Build a reverse lookup so we can find each rule's index in rules_for_verification
+        rule_index: dict[int, int] = {id(r): i for i, r in enumerate(rules_for_verification)}
 
         verified_rules = []
         for test_name, group in by_test.items():
             print(f"  Verifying pathway '{test_name}' ({len(group)} rules)...")
-            surviving = _verify_group(group, test_name)
+            # Build a local evidence map keyed by position within this group
+            group_evidence: dict[int, dict] | None = None
+            if grounding and evidence_by_rule:
+                group_evidence = {}
+                for local_i, rule in enumerate(group):
+                    global_i = rule_index.get(id(rule))
+                    if global_i is not None and global_i in evidence_by_rule:
+                        group_evidence[local_i] = evidence_by_rule[global_i]
+
+            surviving = _verify_group(group, test_name, evidence_map=group_evidence)
             verified_rules.extend(surviving)
 
-        total_dropped = len(schema_ok) - len(verified_rules)
+        total_dropped = len(rules_for_verification) - len(verified_rules)
         print(f"\nVerification complete: {len(verified_rules)} rules kept, {total_dropped} removed.\n")
 
-    # ── Pass 3: Name normalisation ────────────────────────────────────────────
+    # ── Pass 2: Name normalisation ────────────────────────────────────────────
     normalised_rules = verified_rules
     if not skip_normalise:
         print("=== Pass 2: Name Normalisation ===")
@@ -265,13 +534,27 @@ def audit(rules_json_path: str, dry_run: bool, skip_verify: bool, skip_normalise
             time.sleep(0.05)  # gentle rate limiting on NLM / OLS4
         print(f"\nNormalisation complete: {total_changes} field(s) updated.\n")
 
+    # ── Write flagged_rules.json ──────────────────────────────────────────────
+    flagged_json_path = os.path.join(
+        os.path.dirname(os.path.abspath(rules_json_path)),
+        "flagged_rules.json",
+    )
+    if flagged_rules:
+        if dry_run:
+            print(f"--dry-run: would write {len(flagged_rules)} flagged rule(s) to '{flagged_json_path}'.")
+        else:
+            with open(flagged_json_path, "w") as f:
+                json.dump(flagged_rules, f, indent=2)
+            print(f"Flagged {len(flagged_rules)} low-evidence rule(s) → '{flagged_json_path}'.")
+
     # ── Summary ───────────────────────────────────────────────────────────────
     original_count  = len(rules)
     surviving_count = len(normalised_rules)
     print("=== Summary ===")
     print(f"  Original rules  : {original_count}")
+    print(f"  Flagged         : {len(flagged_rules)}")
     print(f"  After audit     : {surviving_count}")
-    print(f"  Removed         : {original_count - surviving_count}")
+    print(f"  Removed         : {original_count - len(flagged_rules) - surviving_count}")
 
     if dry_run:
         print("\n--dry-run: no file changes written.")
@@ -307,6 +590,13 @@ def audit(rules_json_path: str, dry_run: bool, skip_verify: bool, skip_normalise
     with open(rules_json_path, "w") as f:
         json.dump(output, f, indent=2)
 
+    # Clean up grounding checkpoint on clean completion
+    if grounding and os.path.exists(_GROUNDING_CHECKPOINT_PATH):
+        try:
+            os.remove(_GROUNDING_CHECKPOINT_PATH)
+        except Exception:
+            pass
+
     print(f"\nWritten back to '{rules_json_path}'.")
     print("Re-run 'python build_kg.py' to rebuild the knowledge graph with the audited rules.")
 
@@ -335,11 +625,31 @@ if __name__ == "__main__":
         "--skip-normalise", action="store_true",
         help="Skip name normalisation; run LLM verification only.",
     )
+    parser.add_argument(
+        "--grounding", action="store_true",
+        help=(
+            "Enable Pass 0: query Europe PMC and DuckDuckGo to gather external evidence "
+            "before LLM verification. Evidence is injected into the verification prompt."
+        ),
+    )
+    parser.add_argument(
+        "--flag-low-evidence", action="store_true",
+        help=(
+            "Requires --grounding. Rules with 0 PMC articles AND 0 web snippets are "
+            "written to flagged_rules.json (sibling of guideline_rules.json) and "
+            "excluded from LLM verification."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.flag_low_evidence and not args.grounding:
+        parser.error("--flag-low-evidence requires --grounding.")
 
     audit(
         rules_json_path=args.rules_json,
         dry_run=args.dry_run,
         skip_verify=args.skip_verify,
         skip_normalise=args.skip_normalise,
+        grounding=args.grounding,
+        flag_low_evidence=args.flag_low_evidence,
     )
