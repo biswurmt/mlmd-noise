@@ -92,11 +92,20 @@ For each rule in the array you receive, verify ALL three criteria:
 
 3. CONDITION specificity — the "condition" must be a real, named diagnosis (e.g.
    "Pulmonary Embolism", not "Respiratory Distress"). Vague descriptors are not conditions.
+   NOTE: ICD-10 codes that contain the word "unspecified" (e.g. "Unspecified acute appendicitis",
+   "Abdominal aortic aneurysm, ruptured, unspecified") ARE real, valid named diagnoses — the
+   word refers to coding granularity, not diagnostic vagueness. Do NOT remove a rule solely
+   because the condition string contains "unspecified".
 
 Return ONLY the rules that pass all three checks, unchanged, as a plain JSON array.
-Do NOT add new rules. When in doubt, remove — a false negative is safer than a false positive.
+Do NOT add new rules. When in doubt and evidence is absent, remove. When evidence is present,
+retain unless the rule clearly fails criterion 1 or 2.
 Output valid JSON only (a bare array, no markdown fences, no explanation).\
 """
+
+# Maximum rules sent to the LLM in a single verification call.
+# Large batches (>20) cause the model to drop everything indiscriminately.
+_MAX_VERIFY_BATCH = 15
 
 VALID_SOURCES = {
     "AHA/ACC", "CTAS", "ACR", "NICE", "ESC", "ACEP", "WHO", "IDSA", "GOLD",
@@ -158,16 +167,16 @@ def _verify_group(
 
         system_prefix = (
             "An [EVIDENCE] block follows the rules. Each rule carries a PMC evidence tier.\n"
-            "Adjust your removal threshold based on the tier:\n"
-            "  • STRONG / GOOD tier: default to RETAIN — this pairing is well-attested in the "
-            "literature; only remove if the source field is clearly fabricated or the pairing "
-            "is clinically absurd.\n"
-            "  • MODERATE tier: evaluate on clinical merits; slight bias toward retaining.\n"
-            "  • LIMITED tier: normal scrutiny — apply all three criteria as written.\n"
-            "  • NONE tier (0 PMC articles and no web snippets): bias toward removal; apply "
-            "extra scrutiny to source and plausibility.\n"
+            "The tier OVERRIDES the default 'when in doubt, remove' instruction:\n"
+            "  • STRONG / GOOD tier: RETAIN by default. Only remove if the source field is "
+            "clearly fabricated (not a real guideline body) or the condition→test pairing is "
+            "clinically absurd. Substantial PMC literature is proof enough of clinical validity.\n"
+            "  • MODERATE tier: evaluate on clinical merits; lean toward retaining.\n"
+            "  • LIMITED tier: apply all three criteria normally.\n"
+            "  • NONE tier (0 PMC articles, no web snippets): apply extra scrutiny; "
+            "bias toward removal when source or plausibility is uncertain.\n"
             "Absence of web snippets alone is NOT grounds for removal when PMC counts are "
-            "substantial — web search coverage is incomplete.\n\n"
+            "substantial — web search coverage of clinical guidelines is incomplete.\n\n"
         )
 
     try:
@@ -571,18 +580,28 @@ def audit(
         verified_rules = []
         for norm_key, group in by_test.items():
             test_name = test_display[norm_key]
-            print(f"  Verifying pathway '{test_name}' ({len(group)} rules)...")
-            # Build a local evidence map keyed by position within this group
-            group_evidence: dict[int, dict] | None = None
-            if grounding and evidence_by_rule:
-                group_evidence = {}
-                for local_i, rule in enumerate(group):
-                    global_i = rule_index.get(id(rule))
-                    if global_i is not None and global_i in evidence_by_rule:
-                        group_evidence[local_i] = evidence_by_rule[global_i]
+            # Split large pathways into sub-batches to prevent LLM saturation.
+            batches = [group[i:i + _MAX_VERIFY_BATCH]
+                       for i in range(0, len(group), _MAX_VERIFY_BATCH)]
+            batch_label = (f" (split into {len(batches)} batches of ≤{_MAX_VERIFY_BATCH})"
+                           if len(batches) > 1 else "")
+            print(f"  Verifying pathway '{test_name}' ({len(group)} rules{batch_label})...")
 
-            surviving = _verify_group(group, test_name, evidence_map=group_evidence)
-            verified_rules.extend(surviving)
+            for batch_i, batch in enumerate(batches):
+                # Build a local evidence map keyed by position within this batch
+                batch_evidence: dict[int, dict] | None = None
+                if grounding and evidence_by_rule:
+                    batch_evidence = {}
+                    for local_i, rule in enumerate(batch):
+                        global_i = rule_index.get(id(rule))
+                        if global_i is not None and global_i in evidence_by_rule:
+                            batch_evidence[local_i] = evidence_by_rule[global_i]
+
+                surviving = _verify_group(batch, test_name, evidence_map=batch_evidence)
+                if len(batches) > 1:
+                    print(f"    [batch {batch_i + 1}/{len(batches)}] "
+                          f"{len(surviving)}/{len(batch)} kept.")
+                verified_rules.extend(surviving)
 
         total_dropped = len(rules_for_verification) - len(verified_rules)
         print(f"\nVerification complete: {len(verified_rules)} rules kept, {total_dropped} removed.\n")
