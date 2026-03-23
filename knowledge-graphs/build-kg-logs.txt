@@ -1,0 +1,105 @@
+Extracting cross-mapped ontology codes...
+Fetching Infoway access token...
+Token obtained. Querying Infoway FHIR API...
+Looking up LOINC codes via UMLS...
+Looking up ICD-10-CM codes via NLM Clinical Tables...
+  Acute myocardial infarction, unspecified → I21.9
+  Cardiac arrhythmia, unspecified → I49.9
+  Testicular Torsion → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/N44.02
+  Epididymitis → N45.1
+  Unspecified fracture of shaft of humerus, right arm, sequela → S42.301S
+  Unspecified acute appendicitis → K35.80
+  Torsion of right ovary and ovarian pedicle → N83.511
+  Other ectopic pregnancy without intrauterine pregnancy → O00.80
+  Ovarian Cancer → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/C56
+  Adnexal Mass → not found
+  Ruptured Ovarian Cyst → not found
+  Acute pulmonary edema → J81.0
+  Malignant pleural effusion → J91.0
+  Lung Cancer → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/C34.90
+  Pneumocystis jirovecii pneumonia (PJP) → not found
+  Pulmonary tuberculosis → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/A15
+  Chronic pneumothorax → J93.81
+  Lung cancer → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/C34.90
+  Unspecified systolic (congestive) heart failure → I50.20
+  Unspecified fracture of skull, sequela → S02.91XS
+  Nontraumatic intracerebral hemorrhage, intraventricular → I61.5
+  Subdural Hematoma → not found
+  Acute Coronary Syndrome → not found
+  Meningococcal pericarditis → A39.53
+  Pulmonary edema secondary to heart failure → not found
+  Acute decompensated heart failure with pulmonary edema → not found
+  Pulmonary Tuberculosis → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/A15
+  Lung Cancer (occult thoracic pathology) → not found
+  Iron deficiency anemia, unspecified → D50.9
+  Anemia of chronic kidney disease → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/D63.1
+  Febrile neutropenia → not found
+  Thrombocytopenia, unspecified → D69.6
+Looking up RxNorm and OpenFDA data for treatments...
+Fetching Europe PMC literature breakdown (symptom ↔ condition)...
+Fetching Europe PMC literature breakdown (condition ↔ test)...
+Fetching Europe PMC literature breakdown (symptom ↔ test)...
+Fetching ClinicalTrials.gov trial counts...
+
+Knowledge graph saved to '/home/achua/mlmd-noise/knowledge-graphs/triage_knowledge_graph.pkl'
+  Nodes : 92
+  Edges : 139
+
+--- Node Inspection ---
+  [Symptom: Chest Pain] -> {'type': 'Symptom', 'ebi_open_code': None, 'snomed_ca_code': '29857009', 'synonyms': [], 'test_evidence': [{'test': 'ECG', 'articles': 52589, 'patents': 9}, {'test': '12-Lead ECG', 'articles': 27603, 'patents': 0}]}
+  [Risk Factor: Hypertension] NOT FOUND
+  [MOI: Fall On Outstretched Hand] NOT FOUND
+  [Attribute: Rebound Tenderness] NOT FOUND
+  [Attribute: Sudden Pain Onset] -> {'type': 'Clinical_Attribute', 'ebi_open_code': None, 'snomed_ca_code': '367327000', 'synonyms': [], 'test_evidence': [{'test': 'Testicular Ultrasound', 'articles': 1049, 'patents': 0}]}
+  [Demographic: Female Of Childbearing Age] NOT FOUND
+
+--- Guideline URL Verification ---
+  [Test: ECG]
+    source       : AHA/ACC
+    guideline_url: https://www.ahajournals.org/doi/10.1161/CIR.0000000000001029
+  [Test: Testicular Ultrasound]
+    source       : ACR
+    guideline_url: https://acsearch.acr.org/docs/69363/Narrative
+  [Test: Arm X-Ray]
+    source       : ACR
+    guideline_url: https://acsearch.acr.org/docs/69418/narrative/
+  [Test: Appendix Ultrasound]
+    source       : ACR
+    guideline_url: https://acsearch.acr.org/docs/69357/narrative/
+
+--- Edge Verification (INDICATES_CONDITION) ---
+  EDGE NOT FOUND: (Symptom: Chest Pain) -> (Condition: Acute Myocardial Infarction)
+  (Symptom: Scrotal Pain) -> (Condition: Testicular Torsion)
+    source           : ACR
+    source_url       : https://acsearch.acr.org/docs/69363/Narrative
+    literature_weight: None
+  EDGE NOT FOUND: (MOI: Fall On Outstretched Hand) -> (Condition: Wrist Fracture)
+  EDGE NOT FOUND: (Attribute: Rebound Tenderness) -> (Condition: Acute Appendicitis)
+
+--- Edge Verification (REQUIRES_TEST) ---
+  EDGE NOT FOUND: (Condition: Acute Myocardial Infarction) -> (Test: ECG)
+  (Condition: Testicular Torsion) -> (Test: Testicular Ultrasound)
+    source                : ACR
+    test_literature_weight: None
+  EDGE NOT FOUND: (Condition: Wrist Fracture) -> (Test: Arm X-Ray)
+  EDGE NOT FOUND: (Condition: Acute Appendicitis) -> (Test: Appendix Ultrasound)
+
+--- Edge Verification (RECOMMENDS_TREATMENT) ---
+  EDGE NOT FOUND: (Condition: Acute Myocardial Infarction) -> (Treatment: Aspirin)
+  EDGE NOT FOUND: (Condition: Arm Fracture) -> (Treatment: Ibuprofen)
+  EDGE NOT FOUND: (Condition: Wrist Fracture) -> (Treatment: Ibuprofen)
+
+--- LOINC & ICD-10 Code Verification ---
+  [Test: ECG]  loinc_code=nan
+  [Test: Arm X-Ray]  loinc_code=nan
+  [Test: Appendix Ultrasound]  loinc_code=nan
+  [Test: Testicular Ultrasound]  loinc_code=nan
+  [Condition: Acute Myocardial Infarction] NOT FOUND
+  [Condition: Arm Fracture] NOT FOUND
+  [Condition: Wrist Fracture] NOT FOUND
+  [Condition: Acute Appendicitis] NOT FOUND
+
+--- Treatment & Adverse Event Node Verification ---
+  [Treatment: Aspirin]  rxcui=1191
+    -> HAS_ADVERSE_EVENT -> [Adverse Event: Fatigue]
+  [Treatment: Ibuprofen] NOT FOUND
