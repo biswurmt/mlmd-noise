@@ -241,3 +241,42 @@ diagnotix/frontend/.vite/
 **/.DS_Store
 
 CLAUDE.md
+
+# LaTeX core build files
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fmt
+*.fot
+*.cb
+*.cb2
+*.lb
+
+# Bibliography
+*.bbl
+*.bcf
+*.blg
+*-blx.aux
+*-blx.bib
+*.run.xml
+
+# Beamer presentation files
+*.nav
+*.snm
+*.vrb
+
+# latexmk specific
+*.fdb_latexmk
+
+# SyncTeX
+*.synctex
+*.synctex.gz
+*.synctex.gz(busy)
+*.pdfsync
+
+# OS generated files
+.DS_Store
