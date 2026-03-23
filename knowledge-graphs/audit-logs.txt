@@ -1,0 +1,235 @@
+Loaded 94 rules across 15 pathway(s) from '/home/achua/mlmd-noise/knowledge-graphs/guideline_rules.json'.
+
+Schema pre-filter: 94 passed, 0 dropped.
+
+=== Pass 0: Evidence Grounding ===
+  [1/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [2/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [3/94] Cardiac arrhythmia, unspecified → ECG
+    PMC: 24016 articles, 1 patents | web snippets: 5
+  [4/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [5/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [6/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [7/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [8/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [9/94] Acute myocardial infarction, unspecified → ECG
+    PMC: 34572 articles, 11 patents | web snippets: 1
+  [10/94] Testicular Torsion → Testicular Ultrasound
+    PMC: 2714 articles, 0 patents | web snippets: 0
+  [11/94] Testicular Torsion → Testicular Ultrasound
+    PMC: 2714 articles, 0 patents | web snippets: 0
+  [12/94] Testicular Torsion → Testicular Ultrasound
+    PMC: 2714 articles, 0 patents | web snippets: 0
+  [13/94] Epididymitis → Testicular Ultrasound
+    PMC: 1479 articles, 0 patents | web snippets: 0
+  [14/94] Unspecified fracture of shaft of humerus, right arm, sequela → Arm X-Ray
+    PMC: 33 articles, 0 patents | web snippets: 0
+  [15/94] Unspecified acute appendicitis → Appendix Ultrasound
+    PMC: 3926 articles, 0 patents | web snippets: 0
+  [16/94] Unspecified acute appendicitis → Appendix Ultrasound
+    PMC: 3926 articles, 0 patents | web snippets: 0
+  [17/94] Unspecified acute appendicitis → Appendix Ultrasound
+    PMC: 3926 articles, 0 patents | web snippets: 0
+  [18/94] Unspecified acute appendicitis → Appendix Ultrasound
+    PMC: 3926 articles, 0 patents | web snippets: 0
+  [19/94] Unspecified acute appendicitis → Appendix Ultrasound
+    PMC: 3926 articles, 0 patents | web snippets: 0
+  [20/94] Torsion of right ovary and ovarian pedicle → Ovarian Ultrasounds
+    PMC: 61 articles, 0 patents | web snippets: 0
+  [21/94] Other ectopic pregnancy without intrauterine pregnancy → Ovarian Ultrasounds
+    PMC: 259 articles, 0 patents | web snippets: 0
+  [22/94] Ovarian Cancer → Ovarian Ultrasounds
+    PMC: 1608 articles, 0 patents | web snippets: 0
+  [23/94] Adnexal Mass → Ovarian Ultrasounds
+    PMC: 321 articles, 0 patents | web snippets: 0
+  [24/94] Ovarian Cancer → Ovarian Ultrasounds
+    PMC: 1608 articles, 0 patents | web snippets: 0
+  [25/94] Ruptured Ovarian Cyst → Ovarian Ultrasounds
+    PMC: 193 articles, 0 patents | web snippets: 0
+  [26/94] Other ectopic pregnancy without intrauterine pregnancy → Ovarian Ultrasounds
+    PMC: 259 articles, 0 patents | web snippets: 0
+  [27/94] Adnexal Mass → Ovarian Ultrasounds
+    PMC: 321 articles, 0 patents | web snippets: 0
+  [28/94] Ovarian Cancer → Ovarian Ultrasounds
+    PMC: 1608 articles, 0 patents | web snippets: 0
+  [29/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [30/94] Fracture of one rib, right side, sequela → Chest X-Ray
+    PMC: 159 articles, 0 patents | web snippets: 5
+  [31/94] Pulmonary Tuberculosis → Chest X-Ray
+    PMC: 35769 articles, 0 patents | web snippets: 0
+  [32/94] Acute pulmonary edema → Chest X-Ray
+    PMC: 20244 articles, 0 patents | web snippets: 0
+  [33/94] Malignant pleural effusion → Chest X-Ray
+    PMC: 14193 articles, 0 patents | web snippets: 0
+  [34/94] Fracture of one rib, right side, sequela → Chest X-Ray
+    PMC: 159 articles, 0 patents | web snippets: 5
+  [35/94] Lung Cancer → Chest X-Ray
+    PMC: 54259 articles, 0 patents | web snippets: 0
+  [36/94] Malignant pleural effusion → Chest X-Ray
+    PMC: 14193 articles, 0 patents | web snippets: 0
+  [37/94] Acute pulmonary edema → Chest X-Ray
+    PMC: 20244 articles, 0 patents | web snippets: 0
+  [38/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [39/94] Pulmonary Tuberculosis → Chest X-Ray
+    PMC: 35769 articles, 0 patents | web snippets: 0
+  [40/94] Acute pulmonary edema → Chest X-Ray
+    PMC: 20244 articles, 0 patents | web snippets: 0
+  [41/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [42/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [43/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [44/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [45/94] Pneumocystis jirovecii pneumonia (PJP) → Chest X-Ray
+    PMC: 429 articles, 0 patents | web snippets: 0
+  [46/94] Pulmonary tuberculosis → Chest X-Ray
+    PMC: 35769 articles, 0 patents | web snippets: 0
+  [47/94] Acute pulmonary edema → Chest X-Ray
+    PMC: 20244 articles, 0 patents | web snippets: 0
+  [48/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [49/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [50/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [51/94] Fracture of one rib, right side, sequela → Chest X-Ray
+    PMC: 159 articles, 0 patents | web snippets: 5
+  [52/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [53/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 4
+  [54/94] Lung cancer → Chest X-Ray
+    PMC: 54259 articles, 0 patents | web snippets: 0
+  [55/94] Unspecified systolic (congestive) heart failure → Chest X-Ray
+    PMC: 3814 articles, 0 patents | web snippets: 0
+  [56/94] Unspecified systolic (congestive) heart failure → Chest X-Ray
+    PMC: 3814 articles, 0 patents | web snippets: 0
+  [57/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 4
+  [58/94] Malignant pleural effusion → Chest X-Ray
+    PMC: 14193 articles, 0 patents | web snippets: 0
+  [59/94] Lung cancer → Chest X-Ray
+    PMC: 54259 articles, 0 patents | web snippets: 0
+  [60/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [61/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [62/94] Retroperitoneal tuberculosis → Chest X-Ray
+    PMC: 1759 articles, 0 patents | web snippets: 0
+  [63/94] Retroperitoneal tuberculosis → Chest X-Ray
+    PMC: 1759 articles, 0 patents | web snippets: 0
+  [64/94] Retroperitoneal tuberculosis → Chest X-Ray
+    PMC: 1759 articles, 0 patents | web snippets: 0
+  [65/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 4
+  [66/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [67/94] Retroperitoneal tuberculosis → Chest X-Ray
+    PMC: 1759 articles, 0 patents | web snippets: 0
+  [68/94] Typhoid pneumonia → Chest X-Ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [69/94] Chronic pneumothorax → Chest X-Ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [70/94] Personal history of traumatic brain injury → Non-contrast Head CT
+    PMC: 2620 articles, 0 patents | web snippets: 0
+  [71/94] Unspecified fracture of skull, sequela → Non-contrast Head CT
+    PMC: 137 articles, 0 patents | web snippets: 0
+  [72/94] Nontraumatic intracerebral hemorrhage, intraventricular → Non-contrast Head CT
+    PMC: 533 articles, 0 patents | web snippets: 0
+  [73/94] Subdural Hematoma → Non-contrast Head CT
+    PMC: 3069 articles, 0 patents | web snippets: 0
+  [74/94] Acute Coronary Syndrome → 12-Lead ECG
+    PMC: 25230 articles, 0 patents | web snippets: 0
+  [75/94] Meningococcal pericarditis → 12-Lead ECG
+    PMC: 103 articles, 0 patents | web snippets: 0
+  [76/94] Typhoid pneumonia → Pulse Oximetry
+    PMC: 100 articles, 0 patents | web snippets: 0
+  [77/94] Pulmonary edema secondary to heart failure → Pulse Oximetry
+    PMC: 2127 articles, 0 patents | web snippets: 0
+  [78/94] Typhoid pneumonia → Chest X-ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [79/94] Acute decompensated heart failure with pulmonary edema → Chest X-ray
+    PMC: 1857 articles, 0 patents | web snippets: 0
+  [80/94] Chronic pneumothorax → Chest X-ray
+    PMC: 10433 articles, 0 patents | web snippets: 5
+  [81/94] Malignant pleural effusion → Chest X-ray
+    PMC: 14193 articles, 0 patents | web snippets: 0
+  [82/94] Pulmonary Tuberculosis → Chest X-ray
+    PMC: 35769 articles, 0 patents | web snippets: 0
+  [83/94] Lung Cancer → Chest X-ray
+    PMC: 54259 articles, 0 patents | web snippets: 0
+  [84/94] Typhoid pneumonia → Chest X-ray
+    PMC: 1754 articles, 0 patents | web snippets: 0
+  [85/94] Pulmonary Tuberculosis → Chest X-ray
+    PMC: 35769 articles, 0 patents | web snippets: 0
+  [86/94] Lung Cancer (occult thoracic pathology) → Chest X-ray
+    PMC: 1252 articles, 0 patents | web snippets: 0
+  [87/94] Scorbutic anemia → Complete Blood Count (CBC)
+    PMC: 4 articles, 0 patents | web snippets: 0
+  [88/94] Scorbutic anemia → Complete Blood Count (CBC)
+    PMC: 4 articles, 0 patents | web snippets: 0
+  [89/94] Iron deficiency anemia, unspecified → Complete Blood Count (CBC)
+    PMC: 1623 articles, 0 patents | web snippets: 0
+  [90/94] Anemia of chronic kidney disease → Complete Blood Count (CBC)
+    PMC: 3722 articles, 0 patents | web snippets: 0
+  [91/94] Febrile neutropenia → Complete Blood Count (CBC)
+    PMC: 1324 articles, 0 patents | web snippets: 0
+  [92/94] Thrombocytopenia, unspecified → Complete Blood Count (CBC)
+    PMC: 4432 articles, 0 patents | web snippets: 0
+  [93/94] Hematologic malignancy (leukemia/lymphoma) → Complete Blood Count (CBC)
+    PMC: 974 articles, 0 patents | web snippets: 0
+  [94/94] Abdominal aortic aneurysm, ruptured, unspecified → Abdominal Ultrasound
+    PMC: 2336 articles, 0 patents | web snippets: 0
+
+Evidence grounding complete: 94 rules annotated.
+
+=== Pass 1: LLM Verification ===
+  Verifying pathway 'ECG' (9 rules)...
+    [verify] 'ECG': 0 kept, 9 removed.
+  Verifying pathway 'Testicular Ultrasound' (4 rules)...
+    [verify] 'Testicular Ultrasound': 0 kept, 4 removed.
+  Verifying pathway 'Arm X-Ray' (1 rules)...
+    [verify] 'Arm X-Ray': 0 kept, 1 removed.
+  Verifying pathway 'Appendix Ultrasound' (5 rules)...
+    [verify] 'Appendix Ultrasound': 0 kept, 5 removed.
+  Verifying pathway 'Ovarian Ultrasounds' (9 rules)...
+    [verify] 'Ovarian Ultrasounds': 4 kept, 5 removed.
+  Verifying pathway 'Chest X-Ray' (41 rules)...
+    [verify] 'Chest X-Ray': 0 kept, 41 removed.
+  Verifying pathway 'Non-contrast Head CT' (4 rules)...
+    [verify] 'Non-contrast Head CT': 2 kept, 2 removed.
+  Verifying pathway '12-Lead ECG' (2 rules)...
+    [verify] '12-Lead ECG': 1 kept, 1 removed.
+  Verifying pathway 'Pulse Oximetry' (2 rules)...
+    [verify] 'Pulse Oximetry': 0 kept, 2 removed.
+  Verifying pathway 'Chest X-ray' (9 rules)...
+    [verify] 'Chest X-ray': 4 kept, 5 removed.
+  Verifying pathway 'Complete Blood Count (CBC)' (7 rules)...
+    [verify] 'Complete Blood Count (CBC)': 1 kept, 6 removed.
+  Verifying pathway 'Abdominal Ultrasound' (1 rules)...
+    [verify] 'Abdominal Ultrasound': 0 kept, 1 removed.
+
+Verification complete: 12 rules kept, 82 removed.
+
+=== Pass 2: Name Normalisation ===
+
+Normalisation complete: 0 field(s) updated.
+
+=== Summary ===
+  Original rules  : 94
+  Flagged         : 0
+  After audit     : 12
+  Removed         : 82
+
+--dry-run: no file changes written.

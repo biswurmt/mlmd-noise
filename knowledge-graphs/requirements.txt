@@ -1,1 +1,16 @@
+# --- Knowledge Graph Construction ---
+requests
+pandas
+networkx
+python-dotenv
+
+# --- Knowledge Graph Visualization ---
+pyvis
+matplotlib
+
+# --- Medical Dataset Downloading ---
+kaggle
+wfdb
+wget
+
 beautifulsoup4>=4.12.0
