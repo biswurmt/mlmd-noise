@@ -52,8 +52,103 @@ _PREFIX_TO_TYPE = {
 # Edges that lead directly to a Test node
 _TEST_EDGES = {"REQUIRES_TEST", "DIRECTLY_INDICATES_TEST"}
 
+# Maps KG test-node label → CSV binary ground-truth column name
+TEST_COLUMN_MAP: dict[str, str] = {
+    "ECG":                   "ecg_dx",
+    "Arm X-Ray":             "xray_arm_dx",
+    "Appendix Ultrasound":   "us_app_dx",
+    "Testicular Ultrasound": "us_testes_dx",
+}
+
 # ---------------------------------------------------------
-# 2. Semantic Matching Function
+# 2. Validation Helpers
+# ---------------------------------------------------------
+
+def _parse_predicted_tests(val) -> set[str]:
+    """Return the set of test names from a comma-separated potential_tests cell."""
+    if not val or (isinstance(val, float)):
+        return set()
+    s = str(val).strip()
+    if s == "No linked tests found" or not s:
+        return set()
+    return {t.strip() for t in s.split(",")}
+
+
+def _run_validation(df: pd.DataFrame) -> pd.DataFrame:
+    """Compare potential_tests predictions to binary ground-truth columns.
+
+    Adds pred_* binary columns to df in-place, prints a metrics table, and
+    returns a DataFrame of per-test metrics.
+    """
+    # Build binary prediction columns
+    pred_col_map: dict[str, str] = {
+        "ecg_dx":         "pred_ecg",
+        "xray_arm_dx":    "pred_xray_arm",
+        "us_app_dx":      "pred_us_app",
+        "us_testes_dx":   "pred_us_testes",
+    }
+    # Reverse: gt_col → test name(s)
+    gt_to_tests: dict[str, list[str]] = {}
+    for test_name, gt_col in TEST_COLUMN_MAP.items():
+        gt_to_tests.setdefault(gt_col, []).append(test_name)
+
+    predicted_sets = df["potential_tests"].apply(_parse_predicted_tests)
+
+    for gt_col, test_names in gt_to_tests.items():
+        pred_col = pred_col_map[gt_col]
+        df[pred_col] = predicted_sets.apply(
+            lambda s, names=test_names: int(bool(s.intersection(names)))
+        )
+
+    # Compute per-test metrics
+    rows = []
+    header = (
+        f"\n{'Test':<25} {'GT Column':<18} {'TP':>4} {'FP':>4} {'TN':>5} {'FN':>4}"
+        f"  {'Prec':>6} {'Rec':>6} {'F1':>6} {'Acc':>6}"
+    )
+    separator = "-" * len(header)
+    print("\n=== Validation Report ===")
+    print(header)
+    print(separator)
+
+    total = len(df)
+    for gt_col, test_names in gt_to_tests.items():
+        pred_col = pred_col_map[gt_col]
+        gt = df[gt_col].astype(int)
+        pred = df[pred_col].astype(int)
+
+        tp = int(((pred == 1) & (gt == 1)).sum())
+        fp = int(((pred == 1) & (gt == 0)).sum())
+        tn = int(((pred == 0) & (gt == 0)).sum())
+        fn = int(((pred == 0) & (gt == 1)).sum())
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1        = (2 * precision * recall / (precision + recall)
+                     if (precision + recall) > 0 else 0.0)
+        accuracy  = (tp + tn) / total if total > 0 else 0.0
+
+        label = " / ".join(test_names)
+        print(
+            f"{label:<25} {gt_col:<18} {tp:>4} {fp:>4} {tn:>5} {fn:>4}"
+            f"  {precision:>6.3f} {recall:>6.3f} {f1:>6.3f} {accuracy:>6.3f}"
+        )
+        rows.append({
+            "test_name":  label,
+            "gt_column":  gt_col,
+            "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+            "precision":  round(precision, 4),
+            "recall":     round(recall, 4),
+            "f1":         round(f1, 4),
+            "accuracy":   round(accuracy, 4),
+        })
+
+    print(separator)
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------
+# 3. Semantic Matching Function
 # ---------------------------------------------------------
 def get_semantic_matches(raw_diagnosis: str, available_nodes: list[dict]) -> list[dict]:
     """Uses Azure OpenAI to return up to 3 high-confidence matches from the graph.
@@ -109,7 +204,7 @@ def get_semantic_matches(raw_diagnosis: str, available_nodes: list[dict]) -> lis
 
 
 # ---------------------------------------------------------
-# 3. Graph Traversal Helper
+# 4. Graph Traversal Helper
 # ---------------------------------------------------------
 def get_tests_for_node(kg, label: str, node_type: str) -> list[str]:
     """Return all Test node labels reachable from a graph node via test edges.
@@ -133,13 +228,14 @@ def get_tests_for_node(kg, label: str, node_type: str) -> list[str]:
 
 
 # ---------------------------------------------------------
-# 4. Main Processing Pipeline
+# 5. Main Processing Pipeline
 # ---------------------------------------------------------
 def map_diagnoses_with_llm(
     csv_input_path: str,
     graph_pkl_path: str,
     csv_output_path: str,
     row_limit: int | None = None,
+    validate: bool = False,
 ):
     # --- Load Graph & Build Node Catalogue ---
     print("Loading Knowledge Graph...")
@@ -217,6 +313,21 @@ def map_diagnoses_with_llm(
     # --- Save Output ---
     df.to_csv(csv_output_path, index=False)
     print(f"\nSuccess! Saved enriched data to '{csv_output_path}'")
+
+    # --- Validation ---
+    if validate:
+        missing = [col for col in TEST_COLUMN_MAP.values() if col not in df.columns]
+        if missing:
+            print(f"\n[!] --validate: ground-truth column(s) not found in CSV: {missing}")
+            print("    Skipping validation. Check that the CSV contains the expected columns.")
+        else:
+            metrics_df = _run_validation(df)
+            validation_path = csv_output_path.replace(".csv", "_validation.csv")
+            metrics_df.to_csv(validation_path, index=False)
+            print(f"\nValidation report saved to '{validation_path}'")
+            # Re-save enriched CSV with pred_* columns included
+            df.to_csv(csv_output_path, index=False)
+
     return df
 
 # ---------------------------------------------------------
@@ -245,6 +356,14 @@ if __name__ == "__main__":
         "--limit", type=int, default=None, metavar="N",
         help="Process only the first N rows of the CSV. Useful for testing before a full run.",
     )
+    parser.add_argument(
+        "--validate", action="store_true",
+        help=(
+            "After mapping, compare predicted tests against binary ground-truth columns "
+            "(ecg_dx, xray_arm_dx, us_app_dx, us_testes_dx) and print per-test metrics. "
+            "Writes a <output>_validation.csv alongside the enriched CSV."
+        ),
+    )
     args = parser.parse_args()
 
     result_df = map_diagnoses_with_llm(
@@ -252,6 +371,7 @@ if __name__ == "__main__":
         args.graph_pkl,
         args.output_csv,
         row_limit=args.limit,
+        validate=args.validate,
     )
 
     print("\n--- Output Preview ---")
