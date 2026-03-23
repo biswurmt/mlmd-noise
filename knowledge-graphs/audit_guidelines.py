@@ -55,6 +55,8 @@ from openai import AzureOpenAI
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_THIS_DIR, ".env"))
 
+UMLS_API_KEY = os.getenv("UMLS_API_KEY")
+
 _endpoint   = os.environ.get("ENDPOINT_URL")
 _deployment = os.environ.get("DEPLOYMENT_NAME")
 
@@ -400,37 +402,38 @@ def _is_low_evidence(evidence: dict) -> bool:
 
 
 def _icd10_canonical_name(term: str) -> str | None:
-    """Return the ICD-10-CM canonical description for term, or None.
+    """Return the UMLS canonical name for term (aligned with ICD-10 international), or None.
 
-    Prefers acute/unspecified codes over encounter-type modifiers ("sequela",
-    "subsequent encounter", "initial encounter") and avoids candidates that
-    introduce "ruptured" when the original term does not contain it — both of
-    which caused the LLM verifier to incorrectly reject clinically valid rules.
+    Uses UMLS normalizedString search — no encounter-modifier filtering needed
+    since WHO ICD-10 does not use ICD-10-CM-specific modifiers like 'sequela'
+    or 'initial encounter'. Keeps the rupture-mismatch guard to avoid candidates
+    that incorrectly introduce 'ruptured' when the original term does not contain it.
     Falls back to the first result only if every candidate fails the filter.
     """
     key = term.lower()
     if key in _nlm_cache:
         return _nlm_cache[key]
+    if not UMLS_API_KEY:
+        _nlm_cache[key] = None
+        return None
     term_has_rupture = bool(re.search(r"\brupt", term, re.IGNORECASE))
     try:
         r = requests.get(
-            "https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search",
-            params={"sf": "code,name", "terms": term, "maxList": 10},
+            "https://uts-ws.nlm.nih.gov/rest/search/current",
+            params={"string": term, "searchType": "normalizedString", "apiKey": UMLS_API_KEY},
             timeout=10,
         )
         r.raise_for_status()
-        items = r.json()[3] if len(r.json()) > 3 else []
+        results = r.json().get("result", {}).get("results", [])
         name = None
-        for item in items:
-            candidate = item[1]
-            if _ICD10_AVOID_RE.search(candidate):
-                continue
+        for res in results:
+            candidate = res.get("name", "")
             if not term_has_rupture and re.search(r"\brupt", candidate, re.IGNORECASE):
                 continue
             name = candidate
             break
-        if name is None and items:
-            name = items[0][1]  # fallback: take first result rather than returning None
+        if name is None and results:
+            name = results[0]["name"]
     except Exception:
         name = None
     _nlm_cache[key] = name

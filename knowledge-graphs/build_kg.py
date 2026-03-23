@@ -155,6 +155,36 @@ def get_infoway_snomed_concept(term, access_token):
         return term, None
 
 
+def get_infoway_icd10ca_concept(term, access_token):
+    """Query Canada Health Infoway FHIR API for an ICD-10-CA concept.
+
+    Reuses the same ValueSet/$expand endpoint as SNOMED CT CA with a
+    different ValueSet URL targeting the ICD-10-CA code system (CIHI).
+    Returns (display_name, code) or (term, None) on failure.
+    """
+    base_uri = "https://terminologystandardsservice.ca/fhir/ValueSet/$expand"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/fhir+json",
+    }
+    params = {
+        "url": "https://fhir.infoway-inforoute.ca/ValueSet/icd10ca-diagnosiscodes",
+        "filter": term,
+        "count": 1,
+    }
+    try:
+        response = requests.get(base_uri, headers=headers, params=params)
+        response.raise_for_status()
+        contains = response.json().get("expansion", {}).get("contains", [])
+        if contains:
+            best = contains[0]
+            return best.get("display"), best.get("code")
+        return term, None
+    except Exception as e:
+        print(f"  Infoway ICD-10-CA error for '{term}': {e}")
+        return term, None
+
+
 def get_open_medical_concept(term):
     """Query EMBL-EBI OLS4 API for an open ontology concept (HP/MONDO/EFO). No key required.
 
@@ -467,6 +497,7 @@ def build_unified_medical_kg(df):
         guideline_url      = row["url"]                        if "url"               in df.columns else None
         loinc_code         = row.get("loinc_code")             if "loinc_code"        in df.columns else None
         icd10_code         = row.get("icd10_code")             if "icd10_code"        in df.columns else None
+        icd10ca_code       = row.get("icd10ca_code")           if "icd10ca_code"      in df.columns else None
         lit_articles       = row.get("lit_articles")           if "lit_articles"      in df.columns else None
         lit_patents        = row.get("lit_patents")            if "lit_patents"       in df.columns else None
         test_lit_articles  = row.get("test_lit_articles")      if "test_lit_articles"   in df.columns else None
@@ -475,7 +506,7 @@ def build_unified_medical_kg(df):
         direct_lit_patents  = row.get("direct_lit_patents")   if "direct_lit_patents"  in df.columns else None
 
         G.add_node(primary_node, **node_attrs, synonyms=node_synonyms)
-        G.add_node(condition_node, type="Condition", icd10_code=icd10_code, synonyms=[])
+        G.add_node(condition_node, type="Condition", icd10_code=icd10_code, icd10ca_code=icd10ca_code, synonyms=[])
         G.add_node(test_node,      type="Diagnostic_Test", guideline_source=row["source"],
                    guideline_url=guideline_url, loinc_code=loinc_code)
 
@@ -622,20 +653,31 @@ def generate_knowledge_graph():
         print("  WARNING: UMLS API key unavailable — LOINC codes will be omitted.")
         df_rules["loinc_code"] = None
 
-    # 5. ICD-10-CM codes — NLM Clinical Tables (no key, always available) as
-    #    the primary source, with UMLS normalizedString as a fallback when a
-    #    key is present (catches conditions the NLM index ranks poorly).
-    print("Looking up ICD-10-CM codes via NLM Clinical Tables...")
+    # 5. ICD-10 codes — WHO international via UMLS source "ICD10" (requires key).
+    print("Looking up ICD-10 (WHO international) codes via UMLS...")
     icd10_map = {}
-    for condition_name in df_rules["condition"].unique():
-        code = get_icd10_nlm(condition_name)
-        if not code and UMLS_API_KEY:
-            _, code = get_umls_concept(condition_name, "ICD10CM", UMLS_API_KEY)
-        icd10_map[condition_name] = code
-        print(f"  {condition_name} → {code if code else 'not found'}")
+    if UMLS_API_KEY:
+        for condition_name in df_rules["condition"].unique():
+            _, code = get_umls_concept(condition_name, "ICD10", UMLS_API_KEY)
+            icd10_map[condition_name] = code
+            print(f"  {condition_name} → {code if code else 'not found'}")
+    else:
+        print("  WARNING: UMLS API key unavailable — ICD-10 codes will be omitted.")
     df_rules["icd10_code"] = df_rules["condition"].map(icd10_map)
 
-    # 6. RxNorm RxCUI + OpenFDA adverse events — only for rows that carry a treatment
+    # 6. ICD-10-CA codes — Canada Health Infoway (reuses existing infoway_token)
+    print("Looking up ICD-10-CA codes via Canada Health Infoway...")
+    icd10ca_map = {}
+    if infoway_token:
+        for condition_name in df_rules["condition"].unique():
+            _, code = get_infoway_icd10ca_concept(condition_name, infoway_token)
+            icd10ca_map[condition_name] = code
+            print(f"  {condition_name} → {code if code else 'not found'}")
+    else:
+        print("  WARNING: Infoway token unavailable — ICD-10-CA codes will be omitted.")
+    df_rules["icd10ca_code"] = df_rules["condition"].map(icd10ca_map)
+
+    # 7. RxNorm RxCUI + OpenFDA adverse events — only for rows that carry a treatment
     if "treatment" in df_rules.columns:
         unique_treatments = df_rules["treatment"].dropna().unique()
         if len(unique_treatments) > 0:
