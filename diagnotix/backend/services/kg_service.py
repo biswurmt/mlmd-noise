@@ -32,6 +32,7 @@ if _KG_DIR not in sys.path:
     sys.path.insert(0, _KG_DIR)
 
 from build_kg import generate_knowledge_graph  # noqa: E402
+from audit_guidelines import _normalise_rule  # noqa: E402
 
 _RULES_FILE = os.path.join(_KG_DIR, "guideline_rules.json")
 
@@ -106,6 +107,11 @@ For each rule in the array you receive, verify ALL three criteria:
 
 3. CONDITION specificity — the "condition" must be a real, named diagnosis (e.g.
    "Pulmonary Embolism", not "Respiratory Distress"). Vague descriptors are not conditions.
+   NOTE: ICD-10 codes containing "unspecified" refer to coding granularity, not vagueness —
+   do NOT remove a rule solely because the condition string contains "unspecified".
+   NOTE: ICD-10 codes containing "sequela" denote the same underlying diagnosis expressed
+   as a late-effect encounter code — the clinical pathway remains valid. Do NOT remove a
+   rule solely because the condition string contains "sequela".
 
 Return ONLY the rules that pass all three checks, unchanged, as a plain JSON array.
 Do NOT add new rules. When in doubt, remove — a false negative is safer than a false positive.
@@ -200,6 +206,161 @@ def _verify_rules(rules: list[dict], diagnostic_test: str) -> list[dict]:
     except Exception as e:
         print(f"  [verify] Verification call failed ({e}) — keeping original rules.")
         return rules
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Targeted regeneration helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _regenerate_targeted(
+    dropped_pairs: list[dict],
+    diagnostic_test: str,
+) -> list[dict]:
+    """Ask the LLM to regenerate rules specifically for (condition, node_type) pairs
+    that were removed during a previous verification pass.
+
+    Args:
+        dropped_pairs: List of dicts with "condition" and "node_type" keys from
+                       the rules that failed verification.
+        diagnostic_test: The diagnostic test string (used for the "test" field).
+
+    Returns:
+        Schema-validated replacement rules (may be empty if generation fails).
+    """
+    if not dropped_pairs:
+        return []
+
+    pair_lines = "\n".join(
+        f"  - condition: \"{p['condition']}\", node_type: \"{p['node_type']}\""
+        for p in dropped_pairs
+    )
+    user_message = (
+        f'The following (condition, node_type) pairs were removed during clinical '
+        f'review for the diagnostic test "{diagnostic_test}". Generate replacement '
+        f'rules that are more precisely grounded in authoritative guidelines.\n\n'
+        f'Pairs to replace:\n{pair_lines}\n\n'
+        f'IMPORTANT: the "test" field must be exactly "{diagnostic_test}" for every rule.\n'
+        f'Generate one rule per pair listed above. Return a JSON array only.'
+    )
+    try:
+        response = _CLIENT.chat.completions.create(
+            model=_deployment,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        text = response.choices[0].message.content or ""
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\[.*\]", text, re.DOTALL)
+            parsed = json.loads(match.group()) if match else []
+
+        if isinstance(parsed, dict):
+            parsed = next((v for v in parsed.values() if isinstance(v, list)), [])
+        if not isinstance(parsed, list):
+            return []
+
+        # Schema validation
+        REQUIRED = {"raw_symptom", "node_type", "condition", "test", "source"}
+        valid: list[dict] = []
+        for rule in parsed:
+            if not isinstance(rule, dict):
+                continue
+            if not REQUIRED.issubset(rule):
+                continue
+            if rule["node_type"] not in VALID_NODE_TYPES:
+                rule["node_type"] = "Symptom"
+            if rule["source"] not in VALID_SOURCES:
+                continue
+            rule["test"] = diagnostic_test
+            valid.append(rule)
+
+        print(f"  [regen] {len(valid)} replacement rule(s) generated for {len(dropped_pairs)} dropped pair(s).")
+        return valid
+
+    except Exception as e:
+        print(f"  [regen] Targeted regeneration failed ({e}) — skipping.")
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Iterative normalise → verify → regenerate loop
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _verify_and_converge(
+    initial_rules: list[dict],
+    diagnostic_test: str,
+    max_iterations: int = 3,
+) -> list[dict]:
+    """Iteratively normalise, verify, and regenerate rules until stable.
+
+    Each iteration:
+      1. Normalises condition/symptom names using ICD-10-CM and HP/MONDO ontologies
+         (via _normalise_rule from audit_guidelines) so the LLM reviewer sees clean
+         clinical terms rather than raw LLM-invented strings.
+      2. Verifies the normalised rules with the LLM clinical reviewer.
+      3. If rules were dropped and iterations remain, calls targeted regeneration
+         for the dropped (condition, node_type) pairs and adds candidates back into
+         the pool for the next iteration.
+
+    Converges when 0 rules are dropped in a pass, or max_iterations is reached.
+
+    Args:
+        initial_rules:  Schema-valid rules from the initial LLM generation pass.
+        diagnostic_test: The diagnostic test name.
+        max_iterations:  Maximum normalise→verify→regen cycles (default 3).
+
+    Returns:
+        The surviving rules after convergence.
+    """
+    current_rules = list(initial_rules)
+
+    for iteration in range(1, max_iterations + 1):
+        print(f"  [loop] Iteration {iteration}/{max_iterations}: "
+              f"{len(current_rules)} candidate rule(s).")
+
+        # Step 1: Normalise names before the LLM reviewer sees them
+        normalised: list[dict] = []
+        for rule in current_rules:
+            updated, changes = _normalise_rule(rule)
+            if changes:
+                for c in changes:
+                    print(f"    [normalise] {c}")
+            normalised.append(updated)
+
+        # Step 2: LLM verification pass
+        survived = _verify_rules(normalised, diagnostic_test)
+        dropped_count = len(normalised) - len(survived)
+
+        if dropped_count == 0:
+            print(f"  [loop] Converged after {iteration} iteration(s) — "
+                  f"{len(survived)} rule(s) stable.")
+            return survived
+
+        print(f"  [loop] {dropped_count} rule(s) dropped in iteration {iteration}.")
+
+        # Step 3: Targeted regeneration for dropped pairs (if iterations remain)
+        if iteration < max_iterations:
+            survived_keys = {
+                (r["condition"].strip().lower(), r["node_type"].strip().lower())
+                for r in survived
+            }
+            dropped_pairs = [
+                {"condition": r["condition"], "node_type": r["node_type"]}
+                for r in normalised
+                if (r["condition"].strip().lower(), r["node_type"].strip().lower())
+                not in survived_keys
+            ]
+            replacements = _regenerate_targeted(dropped_pairs, diagnostic_test)
+            current_rules = survived + replacements
+        else:
+            current_rules = survived
+
+    print(f"  [loop] Reached max_iterations ({max_iterations}) — "
+          f"returning {len(current_rules)} surviving rule(s).")
+    return current_rules
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -301,9 +462,9 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
             f"Azure OpenAI generated {len(new_rules)} raw rules but none passed schema validation."
         )
 
-    # ── 4b. LLM verification pass ────────────────────────────────────────────
-    print(f"  Running verification pass on {len(valid_rules)} schema-valid rule(s)...")
-    valid_rules = _verify_rules(valid_rules, diagnostic_test)
+    # ── 4b. Iterative normalise → verify → regenerate loop ───────────────────
+    print(f"  Starting verify-and-converge loop on {len(valid_rules)} schema-valid rule(s)...")
+    valid_rules = _verify_and_converge(valid_rules, diagnostic_test)
 
     if not valid_rules:
         raise ValueError(

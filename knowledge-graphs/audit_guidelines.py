@@ -93,9 +93,12 @@ For each rule in the array you receive, verify ALL three criteria:
 3. CONDITION specificity — the "condition" must be a real, named diagnosis (e.g.
    "Pulmonary Embolism", not "Respiratory Distress"). Vague descriptors are not conditions.
    NOTE: ICD-10 codes that contain the word "unspecified" (e.g. "Unspecified acute appendicitis",
-   "Abdominal aortic aneurysm, ruptured, unspecified") ARE real, valid named diagnoses — the
-   word refers to coding granularity, not diagnostic vagueness. Do NOT remove a rule solely
+   "Abdominal aortic aneurysm, without rupture, unspecified") ARE real, valid named diagnoses —
+   the word refers to coding granularity, not diagnostic vagueness. Do NOT remove a rule solely
    because the condition string contains "unspecified".
+   NOTE: ICD-10 codes that contain the word "sequela" denote the same underlying diagnosis
+   expressed as a late-effect encounter code — the clinical pathway remains valid. Do NOT
+   remove a rule solely because the condition string contains "sequela".
 
 Return ONLY the rules that pass all three checks, unchanged, as a plain JSON array.
 Do NOT add new rules. When in doubt and evidence is absent, remove. When evidence is present,
@@ -182,6 +185,7 @@ def _verify_group(
     try:
         response = _CLIENT.chat.completions.create(
             model=_deployment,
+            temperature=0,   # deterministic output — prevents run-to-run stochastic variation
             messages=[
                 {"role": "system", "content": system_prefix + VERIFICATION_PROMPT},
                 {"role": "user", "content": (
@@ -343,6 +347,13 @@ _ICD10_JARGON_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Encounter-type modifiers that make ICD-10 codes inappropriate for acute triage
+# rules.  Used by _icd10_canonical_name() to skip bad normalisation candidates.
+_ICD10_AVOID_RE = re.compile(
+    r"\b(sequela|subsequent encounter|initial encounter|late effect)\b",
+    re.IGNORECASE,
+)
+
 
 def _strip_icd10_jargon(condition: str) -> str:
     """Remove ICD-10 boilerplate words that hurt web-search quality.
@@ -389,19 +400,37 @@ def _is_low_evidence(evidence: dict) -> bool:
 
 
 def _icd10_canonical_name(term: str) -> str | None:
-    """Return the ICD-10-CM canonical description for term, or None."""
+    """Return the ICD-10-CM canonical description for term, or None.
+
+    Prefers acute/unspecified codes over encounter-type modifiers ("sequela",
+    "subsequent encounter", "initial encounter") and avoids candidates that
+    introduce "ruptured" when the original term does not contain it — both of
+    which caused the LLM verifier to incorrectly reject clinically valid rules.
+    Falls back to the first result only if every candidate fails the filter.
+    """
     key = term.lower()
     if key in _nlm_cache:
         return _nlm_cache[key]
+    term_has_rupture = bool(re.search(r"\brupt", term, re.IGNORECASE))
     try:
         r = requests.get(
             "https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search",
-            params={"sf": "code,name", "terms": term, "maxList": 3},
+            params={"sf": "code,name", "terms": term, "maxList": 10},
             timeout=10,
         )
         r.raise_for_status()
         items = r.json()[3] if len(r.json()) > 3 else []
-        name = items[0][1] if items else None
+        name = None
+        for item in items:
+            candidate = item[1]
+            if _ICD10_AVOID_RE.search(candidate):
+                continue
+            if not term_has_rupture and re.search(r"\brupt", candidate, re.IGNORECASE):
+                continue
+            name = candidate
+            break
+        if name is None and items:
+            name = items[0][1]  # fallback: take first result rather than returning None
     except Exception:
         name = None
     _nlm_cache[key] = name
@@ -506,7 +535,28 @@ def audit(
             schema_dropped += 1
             continue
         schema_ok.append(rule)
-    print(f"\nSchema pre-filter: {len(schema_ok)} passed, {schema_dropped} dropped.\n")
+    print(f"\nSchema pre-filter: {len(schema_ok)} passed, {schema_dropped} dropped.")
+
+    # ── Deduplication ─────────────────────────────────────────────────────────
+    # Remove exact (raw_symptom, condition, test, source) duplicates that
+    # accumulate when Diagnotix runs multiple generation passes for the same test.
+    seen_keys: set[tuple] = set()
+    deduped: list[dict] = []
+    for rule in schema_ok:
+        key = (
+            rule["raw_symptom"].strip().lower(),
+            rule["condition"].strip().lower(),
+            rule["test"].strip().lower(),
+            rule["source"].strip().lower(),
+        )
+        if key not in seen_keys:
+            seen_keys.add(key)
+            deduped.append(rule)
+    n_dupes = len(schema_ok) - len(deduped)
+    if n_dupes:
+        print(f"Deduplication: {n_dupes} exact duplicate(s) removed, {len(deduped)} unique rules remain.")
+    schema_ok = deduped
+    print(f"\n")
 
     # ── Pass 1: Name Normalisation (first — clean names before evidence/LLM) ────
     normalised_schema = schema_ok
