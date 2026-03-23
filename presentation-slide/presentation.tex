@@ -126,22 +126,22 @@
     arr/.style={-{Latex[length=2.5mm]}, thick, color=midblue},
   ]
     \node[box, fill=riskfactor!70] (json)
-      {\texttt{guideline\_rules.json}\\{\tiny curated rules}};
+      {Rule Store\\{\tiny curated rules}};
 
     \node[box, fill=vital!60, right=of json] (build)
-      {\texttt{build\_kg.py}\\{\tiny 9-step enrichment}};
+      {Graph Builder\\{\tiny 10-step enrichment}};
 
     \node[box, fill=condition!60, right=of build] (pkl)
-      {\texttt{.pkl}\\{\tiny NetworkX DiGraph}};
+      {Graph Store\\{\tiny NetworkX DiGraph}};
 
     \node[box, fill=testcol!70, right=of pkl] (diagnotix)
       {\textbf{Diagnotix}\\{\tiny React + FastAPI}};
 
     \node[box, fill=symptom!60, below=of pkl] (pipe)
-      {\texttt{data-processing/}\\{\tiny CSV enrichment}};
+      {Patient Mapper\\{\tiny CSV enrichment}};
 
     \node[box, fill=attribute!60, below=of build] (audit)
-      {\texttt{audit\_guidelines.py}\\{\tiny LLM audit}};
+      {Audit Pipeline\\{\tiny LLM audit}};
 
     \draw[arr] (json)         -- (build);
     \draw[arr] (build)        -- (pkl);
@@ -154,16 +154,16 @@
   \vspace{0.4em}
   \small
   Rules are iteratively audited and revised until satisfactory, then
-  \texttt{build\_kg.py} serialises the final graph. The \texttt{.pkl}
+  the graph builder serialises the final graph. The graph store
   powers \textbf{Diagnotix} for dynamic expansion and
-  \texttt{data-processing/} for patient CSV enrichment.
+  the patient mapper for CSV enrichment.
 \end{frame}
 
 % =============================================================================
 \section{Knowledge Graph Construction}
 % =============================================================================
 
-\begin{frame}[fragile]{Source of Truth: \texttt{guideline\_rules.json}}
+\begin{frame}[fragile]{Source of Truth: The Clinical Rule Store}
   Each of the 45 rules encodes a single clinical assertion:
 
   \vspace{0.3em}
@@ -203,27 +203,28 @@
   \end{columns}
 \end{frame}
 
-\begin{frame}{9-Step Enrichment Pipeline (\texttt{build\_kg.py})}
-  \small
+\begin{frame}{10-Step Enrichment Pipeline (Graph Builder)}
+  \scriptsize
   \begin{tabular}{@{}clll@{}}
     \toprule
     \textbf{Step} & \textbf{API / Source} & \textbf{Enriches} & \textbf{Column(s) added} \\
     \midrule
     0 & Static rules          & ---               & base DataFrame \\
-    1 & \texttt{GUIDELINE\_URLS} dict & \texttt{(source, test)} & \texttt{url} \\
+    1 & URL Registry                  & \texttt{(source, test)} & \texttt{url} \\
     2 & EMBL-EBI OLS4 (HP/MONDO/EFO) & \texttt{raw\_symptom} & \texttt{ebi\_code}, \texttt{synonyms} \\
     3 & Infoway FHIR (SNOMED CT CA)  & \texttt{raw\_symptom} & \texttt{infoway\_code} \\
     4 & UMLS REST (LOINC)            & \texttt{test}         & \texttt{loinc\_code} \\
-    5 & UMLS REST (ICD-10-CM)        & \texttt{condition}    & \texttt{icd10\_code} \\
-    6 & NLM RxNorm + OpenFDA         & \texttt{treatment}    & \texttt{rxcui}, \texttt{adverse\_event} \\
-    7 & Europe PMC                   & symptom \(\leftrightarrow\) condition & \texttt{literature\_weight} \\
-    8 & Europe PMC                   & condition \(\leftrightarrow\) test & \texttt{test\_literature\_weight} \\
-    9 & ClinicalTrials.gov v2        & condition \(\leftrightarrow\) treatment & \texttt{trial\_count} \\
+    5 & UMLS REST (ICD-10 international) & \texttt{condition} & \texttt{icd10\_code} \\
+    6 & Infoway FHIR (ICD-10-CA)     & \texttt{condition}    & \texttt{icd10ca\_code} \\
+    7 & NLM RxNorm + OpenFDA         & \texttt{treatment}    & \texttt{rxcui}, \texttt{adverse\_event} \\
+    8 & Europe PMC                   & symptom \(\leftrightarrow\) condition & \texttt{literature\_weight} \\
+    9 & Europe PMC                   & condition \(\leftrightarrow\) test & \texttt{test\_literature\_weight} \\
+    10 & ClinicalTrials.gov v2       & condition \(\leftrightarrow\) treatment & \texttt{trial\_count} \\
     \bottomrule
   \end{tabular}
 
   \vspace{0.4em}
-  Steps 7--9 attach \textbf{real-world evidence counts} that drive edge-width
+  Steps 8--10 attach \textbf{real-world evidence counts} that drive edge-width
   scaling in the HTML visualisation.
 \end{frame}
 
@@ -272,29 +273,115 @@
 \section{Guideline Audit Pipeline}
 % =============================================================================
 
-\begin{frame}{\texttt{audit\_guidelines.py} --- Three-Pass Audit}
-  \textbf{Problem:} LLM-generated triage rules can be fabricated, vague, or
-  misattributed. The audit pipeline retroactively cleans
-  \texttt{guideline\_rules.json} before it enters the graph.
+% ── Audit slide 1: pipeline overview ─────────────────────────────────────────
+\begin{frame}{Audit Pipeline Overview}
+  \textbf{Problem:} LLM-generated rules can be fabricated, vague, or misattributed.
+  The audit pipeline cleans the rule store before the graph is built.
 
-  \vspace{0.6em}
-  \begin{block}{Pass 1 --- Schema \& source pre-filter}
-    Drops rules with missing required fields or unrecognised guideline bodies
-    (allowlist of 33 organisations: AHA/ACC, ACR, NICE, CTAS, ESC, \ldots).
-  \end{block}
+  \vspace{0.5em}
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.4cm and 0.4cm,
+    box/.style={draw, rounded corners, fill=lightgray,
+                text width=2.1cm, align=center, minimum height=1.1cm,
+                font=\scriptsize},
+    arr/.style={-{Latex[length=2.5mm]}, thick, color=midblue},
+  ]
+    \node[box, fill=riskfactor!70] (pre)
+      {\textbf{Pre-processing}\\[2pt]{\tiny schema filter\\deduplication}};
+    \node[box, fill=vital!60, right=of pre] (norm)
+      {\textbf{Pass 1}\\[2pt]{\tiny Name\\Normalisation}};
+    \node[box, fill=condition!60, right=of norm] (ground)
+      {\textbf{Pass 2}\\[2pt]{\tiny Evidence\\Grounding}};
+    \node[box, fill=testcol!70, right=of ground] (verify)
+      {\textbf{Pass 3}\\[2pt]{\tiny LLM Clinical\\Verification}};
+    \node[box, fill=symptom!50, right=of verify] (out)
+      {\textbf{Output}\\[2pt]{\tiny clean rule store}};
 
-  \begin{block}{Pass 2 --- LLM clinical verification (per pathway)}
-    Rules are grouped by diagnostic test and sent to an Azure OpenAI reviewer.
-    The LLM checks: (1) source accuracy, (2) clinical plausibility,
-    (3) condition specificity. Only rules that pass all three are kept.
-    \emph{When in doubt, remove --- false negatives are safer.}
-  \end{block}
+    \draw[arr] (pre)    -- (norm);
+    \draw[arr] (norm)   -- (ground);
+    \draw[arr] (ground) -- (verify);
+    \draw[arr] (verify) -- (out);
+  \end{tikzpicture}
 
-  \begin{block}{Pass 3 --- Name normalisation}
-    \texttt{condition} $\to$ ICD-10-CM canonical description (NLM API).\quad
-    \texttt{raw\_symptom} $\to$ HP/MONDO canonical label (EBI OLS4 API).
-    Original string kept when no high-confidence match is found.
-  \end{block}
+  \vspace{0.3em}
+  \begin{columns}[T]
+    \begin{column}{0.24\textwidth}
+      \footnotesize
+      \textbf{Pre-processing}\\
+      Drop rules with missing fields or unknown sources.
+      Remove exact duplicate triples from repeated generation passes.
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \footnotesize
+      \textbf{Pass 1 — Normalise}\\
+      Replace LLM-invented names with canonical labels \emph{before} LLM review:
+      ICD-10 international (UMLS) and HP/MONDO (OLS4).
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \footnotesize
+      \textbf{Pass 2 — Ground}\\
+      Fetch Europe PMC article counts + DuckDuckGo snippets.
+      Tag each rule with a PMC evidence tier.
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \footnotesize
+      \textbf{Pass 3 — Verify}\\
+      LLM reviews each pathway in batches of $\leq$15.
+      Evidence tier sets the retention bias.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ── Audit slide 2: evidence grounding + verification detail ───────────────────
+\begin{frame}{Audit Pipeline --- Evidence Grounding \& Verification}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{block}{Pass 2 --- Evidence Grounding}
+        \small
+        Two signals fetched per rule:
+        \begin{itemize}
+          \item \textbf{Europe PMC} co-occurrence count
+          \item \textbf{DuckDuckGo} web snippets
+        \end{itemize}
+        \vspace{0.2em}
+        Rules tagged by \textbf{PMC evidence tier}:
+        \begin{center}
+          \footnotesize
+          \begin{tabular}{@{}ll@{}}
+            \textbf{STRONG}   & $\geq$5\,000 articles \\
+            \textbf{GOOD}     & $\geq$500 \\
+            \textbf{MODERATE} & $\geq$50 \\
+            \textbf{LIMITED}  & $>$0 \\
+            \textbf{NONE}     & 0 \\
+          \end{tabular}
+        \end{center}
+        Zero-evidence rules flagged for clinician review.
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{block}{Pass 3 --- LLM Clinical Verification}
+        \small
+        LLM reviewer grouped by pathway, batched at \textbf{$\leq$15 rules/call}.
+
+        \vspace{0.2em}
+        Evidence tier drives retention bias:
+        \begin{itemize}
+          \item STRONG / GOOD $\to$ retain by default
+          \item MODERATE / LIMITED $\to$ normal scrutiny
+          \item NONE $\to$ bias to remove
+        \end{itemize}
+
+        \vspace{0.2em}
+        Three verification criteria:
+        \begin{enumerate}
+          \item Source accuracy
+          \item Clinical plausibility
+          \item Condition specificity
+        \end{enumerate}
+      \end{block}
+    \end{column}
+  \end{columns}
 \end{frame}
 
 
@@ -310,15 +397,15 @@
   \begin{columns}[T]
     \begin{column}{0.48\textwidth}
       \begin{block}{Phase 1 --- Extract candidate tests}
-        \texttt{csv\_extract\_potential\_test.py}\\[0.3em]
+        \textbf{Test Extractor}\\[0.3em]
         Reads all unique diagnoses from the \texttt{dx} column and asks
-        Azure OpenAI to identify the standard diagnostic test(s) for each.
-        Writes \texttt{diagnoses\_to\_tests\_graph\_data.json}.
+        GPT-5 Nano to identify the standard diagnostic test(s) for each.
+        Writes a diagnosis-to-test mapping file.
       \end{block}
     \end{column}
     \begin{column}{0.48\textwidth}
       \begin{block}{Phase 2 --- Expand graph \& map patients}
-        \texttt{kg\_enrichment\_pipeline.py}\\[0.3em]
+        \textbf{Enrichment \& Mapping Pipeline}\\[0.3em]
         Adds any new test pathways to the KG, rebuilds the graph with full
         ontology enrichment, then maps every diagnosis back to a condition
         node and its recommended tests.
@@ -328,73 +415,9 @@
 
   \vspace{0.5em}
   \begin{block}{Standalone mapping (graph already current)}
-    \texttt{csv\_mapping.py} --- skips graph expansion; semantically maps a
-    new patient CSV against the existing PKL via Azure OpenAI.
+    \textbf{Patient Mapper} --- skips graph expansion; semantically maps a
+    new patient CSV against the existing graph store via GPT-5 Nano.
   \end{block}
-\end{frame}
-
-\begin{frame}[fragile]{Phase 1 --- \texttt{csv\_extract\_potential\_test.py}}
-  \begin{columns}[T]
-    \begin{column}{0.52\textwidth}
-      \textbf{Input:} patient CSV with a \texttt{dx} (diagnosis) column.\\[0.5em]
-      \textbf{Steps:}
-      \begin{enumerate}
-        \item Collect all unique diagnosis strings from \texttt{dx}.
-        \item Batch them (default 20 per call) to Azure OpenAI.
-        \item LLM consolidates variant spellings into canonical test names
-              suitable as KG node labels\\
-              (e.g.\ all variants of ``US Appendix'' $\to$
-              \texttt{"Appendix Ultrasound"}).
-        \item Write \texttt{diagnoses\_to\_tests\_graph\_data.json}.
-      \end{enumerate}
-    \end{column}
-    \begin{column}{0.44\textwidth}
-      \begin{exampleblock}{Output (per diagnosis)}
-        \begin{lstlisting}[language={}]
-{
-  "diagnosis":
-    "Acute Appendicitis",
-  "diagnostic_tests": [
-    "Appendix Ultrasound",
-    "Complete Blood Count"
-  ]
-}
-        \end{lstlisting}
-      \end{exampleblock}
-    \end{column}
-  \end{columns}
-\end{frame}
-
-\begin{frame}{Phase 2 --- \texttt{kg\_enrichment\_pipeline.py}}
-  \footnotesize
-  \begin{tabular}{@{}cp{9.5cm}@{}}
-    \toprule
-    \textbf{Step} & \textbf{Action} \\
-    \midrule
-    1  & Read \texttt{diagnoses\_to\_tests\_graph\_data.json}; collect unique test names. \\
-    1b & \emph{(Optional)} LLM ranks candidates by clinical importance; keep top \(N\) via \texttt{--top-x}. \\
-    2  & For each new test, call Azure OpenAI to generate 8--15 triage rules grounded in clinical guidelines. \\
-    3  & Append new rules to \texttt{guideline\_rules.json} (tests already present are skipped). \\
-    4  & Rebuild the PKL via \texttt{build\_kg.generate\_knowledge\_graph()} --- full multi-ontology enrichment. \\
-    5  & Semantically map every \texttt{dx} value to a graph condition node; write enriched CSV. \\
-    \bottomrule
-  \end{tabular}
-
-  \vspace{0.4em}
-  \begin{columns}[T]
-    \begin{column}{0.48\textwidth}
-      \begin{alertblock}{Checkpoint / resume}
-        Step 5 writes a sidecar checkpoint after every LLM call.
-        Interrupted runs resume from where they left off.
-      \end{alertblock}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{block}{Output columns added to CSV}
-        \texttt{matched\_graph\_condition}\\{\small best-matching \texttt{Condition:} node}\\[0.3em]
-        \texttt{potential\_tests}\\{\small tests linked via \texttt{REQUIRES\_TEST}}
-      \end{block}
-    \end{column}
-  \end{columns}
 \end{frame}
 
 % =============================================================================
@@ -409,33 +432,30 @@
       \begin{itemize}
         \item Enter any diagnostic test name; the LLM extracts
               8--15 evidence-based triage rules automatically.
-        \item Generated rules are validated and audited via
-              \texttt{audit\_guidelines.py} before being committed
-              to the graph.
-        \item Validated rules are appended to
-              \texttt{guideline\_rules.json} and the full ontology
-              enrichment pipeline re-runs.
+        \item Generated rules are validated via an evidence-grounded
+              audit pipeline: Europe PMC co-occurrence + DuckDuckGo
+              web search ground each rule before LLM clinical review.
+        \item Validated rules are appended to the rule store and the
+              full ontology enrichment pipeline re-runs.
         \item Every expansion is auditable: the response reports
               new rule count and updated node/edge totals.
       \end{itemize}
     \end{column}
     \begin{column}{0.45\textwidth}
-      \begin{block}{\texttt{POST /api/kg/expand}}
-        \begin{lstlisting}[language={}]
-{ "diagnostic_test": "CT Head" }
-
--> {
-  "new_rules_added": 11,
-  "nodes": 98,
-  "edges": 247
-}
-        \end{lstlisting}
-      \end{block}
       \begin{block}{Stack}
         \small
         Backend: FastAPI + Uvicorn\\
         Frontend: React 19 + TypeScript + Vite\\
-        LLM: Claude (Anthropic API)
+        LLM: GPT-5 Nano
+      \end{block}
+      \begin{block}{Node tooltip codes}
+        \small
+        \begin{tabular}{@{}ll@{}}
+          HP/MONDO    & SNOMED-CT \\
+          ICD-10$^{*}$ (linked) & ICD-10-CA \\
+          LOINC       & RxCUI \\
+        \end{tabular}\\[2pt]
+        \tiny $^{*}$links to WHO ICD-10 browser
       \end{block}
     \end{column}
   \end{columns}
@@ -453,11 +473,12 @@
       \begin{itemize}
         \item An expandable knowledge graph spanning 5 clinical
               pathways, grounded in evidence-based guidelines.
-        \item 9-step ontology enrichment pipeline (SNOMED, LOINC,
-              ICD-10, HP/MONDO, RxNorm, Europe PMC,
-              ClinicalTrials.gov).
-        \item LLM-powered audit pipeline to ensure rule accuracy
-              and source attribution.
+        \item 10-step ontology enrichment pipeline (SNOMED CT CA,
+              LOINC, ICD-10 international, ICD-10-CA, HP/MONDO,
+              RxNorm, Europe PMC, ClinicalTrials.gov).
+        \item Evidence-grounded audit pipeline: Europe PMC +
+              web search evidence tiers inform LLM verification
+              to reduce hallucinated rule retention.
         \item Two-phase data processing pipeline for back-mapping
               patient diagnoses to recommended diagnostic tests.
       \end{itemize}
