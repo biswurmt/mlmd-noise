@@ -6,7 +6,7 @@ Schema pre-filter: 94 passed, 0 dropped.
 
 Normalisation complete: 0 field(s) updated.
 
-  [grounding] Resumed from checkpoint (84 cached entries).
+  [grounding] Resumed from checkpoint (130 cached entries).
 === Pass 2: Evidence Grounding ===
   [1/94] Acute myocardial infarction, unspecified → ECG
     PMC: 34572 articles, 11 patents | web snippets: 5
@@ -201,17 +201,24 @@ Evidence grounding complete: 94 rules annotated.
 
 === Pass 3: LLM Verification ===
   Verifying pathway 'ECG' (9 rules)...
-    [verify] 'ECG': 5 kept, 4 removed.
+    [verify] 'ECG': 8 kept, 1 removed.
   Verifying pathway 'Testicular Ultrasound' (4 rules)...
-    [verify] 'Testicular Ultrasound': 3 kept, 1 removed.
+    [verify] 'Testicular Ultrasound': 4 kept, 0 removed.
   Verifying pathway 'Arm X-Ray' (1 rules)...
-    [verify] 'Arm X-Ray': 0 kept, 1 removed.
+    [verify] 'Arm X-Ray': 1 kept, 0 removed.
   Verifying pathway 'Appendix Ultrasound' (5 rules)...
-    [verify] 'Appendix Ultrasound': 0 kept, 5 removed.
+    [verify] 'Appendix Ultrasound': 2 kept, 3 removed.
   Verifying pathway 'Ovarian Ultrasounds' (9 rules)...
-    [verify] 'Ovarian Ultrasounds': 8 kept, 1 removed.
-  Verifying pathway 'Chest X-Ray' (50 rules)...
-    [verify] 'Chest X-Ray': 0 kept, 50 removed.
+    [verify] 'Ovarian Ultrasounds': 4 kept, 5 removed.
+  Verifying pathway 'Chest X-Ray' (50 rules (split into 4 batches of ≤15))...
+    [verify] 'Chest X-Ray': 9 kept, 6 removed.
+    [batch 1/4] 9/15 kept.
+    [verify] 'Chest X-Ray': 5 kept, 10 removed.
+    [batch 2/4] 5/15 kept.
+    [verify] 'Chest X-Ray': 3 kept, 12 removed.
+    [batch 3/4] 3/15 kept.
+    [verify] 'Chest X-Ray': 3 kept, 2 removed.
+    [batch 4/4] 3/5 kept.
   Verifying pathway 'Non-contrast Head CT' (4 rules)...
     [verify] 'Non-contrast Head CT': 2 kept, 2 removed.
   Verifying pathway '12-Lead ECG' (2 rules)...
@@ -223,12 +230,12 @@ Evidence grounding complete: 94 rules annotated.
   Verifying pathway 'Abdominal Ultrasound' (1 rules)...
     [verify] 'Abdominal Ultrasound': 0 kept, 1 removed.
 
-Verification complete: 26 rules kept, 68 removed.
+Verification complete: 49 rules kept, 45 removed.
 
 === Summary ===
   Original rules  : 94
   Flagged         : 0
-  After audit     : 26
-  Removed         : 68
+  After audit     : 49
+  Removed         : 45
 
 --dry-run: no file changes written.
