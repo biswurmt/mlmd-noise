@@ -1,27 +1,36 @@
 """audit_guidelines.py
 ======================
-Retroactively audits guideline_rules.json in two passes:
+Retroactively audits guideline_rules.json in three passes (run in order):
 
-  Pass 1 — Verification
+  Pass 1 — Name normalisation (always runs first)
+    Replaces LLM-invented condition and symptom strings with canonical names
+    from authoritative ontologies before any LLM review or evidence queries:
+      • condition   → ICD-10-CM canonical description (NLM Clinical Tables API)
+      • raw_symptom → HP / MONDO canonical label (EMBL-EBI OLS4 API)
+    The original string is kept when no high-confidence ontology match is found.
+    Running this first ensures the LLM sees clean clinical names, not verbose
+    ICD-10 boilerplate strings like "…, unspecified" or "…, sequela".
+
+  Pass 2 — Evidence Grounding (optional, --grounding flag)
+    Queries Europe PMC co-occurrence and DuckDuckGo for each rule and annotates
+    it with a PMC evidence tier.  Rules with zero evidence on both signals can
+    optionally be written to flagged_rules.json (--flag-low-evidence).
+
+  Pass 3 — LLM Verification
     Groups rules by diagnostic test (pathway) and sends each group through
     the same LLM clinical reviewer used by kg_service.py.  Rules that fail
     (fabricated source, implausible pairing, vague condition) are removed.
-
-  Pass 2 — Name normalisation
-    Replaces LLM-invented condition and symptom strings with canonical names
-    from authoritative ontologies:
-      • condition  → ICD-10-CM canonical description (NLM Clinical Tables API)
-      • raw_symptom → HP / MONDO canonical label (EMBL-EBI OLS4 API)
-    The original string is kept when no high-confidence ontology match is found.
+    When grounding is enabled, the evidence tiers are injected into the prompt
+    so the LLM can weight its decision accordingly.
 
 Usage
 -----
-  python audit_guidelines.py                                    # verify + normalise, write in-place
+  python audit_guidelines.py                                    # normalise + verify, write in-place
   python audit_guidelines.py --dry-run                         # report only, no file changes
   python audit_guidelines.py --skip-verify                     # normalise names only
   python audit_guidelines.py --skip-normalise                  # verify only
   python audit_guidelines.py --rules-json /path/to/guideline_rules.json
-  python audit_guidelines.py --grounding                       # Pass 0: PMC + web grounding before LLM review
+  python audit_guidelines.py --grounding                       # Pass 2: PMC + web grounding before LLM review
   python audit_guidelines.py --grounding --flag-low-evidence   # also writes flagged_rules.json
   python audit_guidelines.py --grounding --dry-run             # grounding report only
 """
@@ -122,10 +131,21 @@ def _verify_group(
             ev = evidence_map.get(i)
             if ev is None:
                 continue
+            pmc_n = ev["pmc_articles"]
+            if pmc_n >= 5000:
+                tier = f"STRONG ({pmc_n:,} PMC articles — retain unless clearly wrong)"
+            elif pmc_n >= 500:
+                tier = f"GOOD ({pmc_n:,} PMC articles — prefer to retain)"
+            elif pmc_n >= 50:
+                tier = f"MODERATE ({pmc_n} PMC articles)"
+            elif pmc_n > 0:
+                tier = f"LIMITED ({pmc_n} PMC articles)"
+            else:
+                tier = "NONE (0 PMC articles — apply extra scrutiny)"
             label = f"Rule {i + 1} ({rule['condition']} → {rule['test']})"
             lines.append(f"\n{label}:")
-            lines.append(f"  Europe PMC co-occurrence: {ev['pmc_articles']} articles, "
-                         f"{ev['pmc_patents']} patents")
+            lines.append(f"  PMC evidence tier: {tier}")
+            lines.append(f"  PMC patents: {ev['pmc_patents']}")
             lines.append(f"  Web search query: \"{ev['ddg_query']}\"")
             if ev["ddg_snippets"]:
                 lines.append(f"  Web snippets ({len(ev['ddg_snippets'])} found):")
@@ -137,11 +157,17 @@ def _verify_group(
         evidence_block = "\n".join(lines)
 
         system_prefix = (
-            "An [EVIDENCE] block is appended after the rules. "
-            "Use it to inform criteria 1 (SOURCE accuracy) and 2 (CLINICAL plausibility). "
-            "High PMC article counts and on-topic web snippets increase confidence in a rule. "
-            "Zero counts on both signals should increase your scrutiny. "
-            "The evidence is advisory — your clinical judgement governs the final decision.\n\n"
+            "An [EVIDENCE] block follows the rules. Each rule carries a PMC evidence tier.\n"
+            "Adjust your removal threshold based on the tier:\n"
+            "  • STRONG / GOOD tier: default to RETAIN — this pairing is well-attested in the "
+            "literature; only remove if the source field is clearly fabricated or the pairing "
+            "is clinically absurd.\n"
+            "  • MODERATE tier: evaluate on clinical merits; slight bias toward retaining.\n"
+            "  • LIMITED tier: normal scrutiny — apply all three criteria as written.\n"
+            "  • NONE tier (0 PMC articles and no web snippets): bias toward removal; apply "
+            "extra scrutiny to source and plausibility.\n"
+            "Absence of web snippets alone is NOT grounds for removal when PMC counts are "
+            "substantial — web search coverage is incomplete.\n\n"
         )
 
     try:
@@ -301,6 +327,25 @@ def _ddg_web_search(query: str) -> list[str]:
     return snippets
 
 
+_ICD10_JARGON_RE = re.compile(
+    r"\b(unspecified|NOS|sequela|initial encounter|subsequent encounter|"
+    r"not elsewhere classified|without intrauterine pregnancy|"
+    r"without mention of|type [0-9]+)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_icd10_jargon(condition: str) -> str:
+    """Remove ICD-10 boilerplate words that hurt web-search quality.
+
+    E.g. "Acute myocardial infarction, unspecified" → "Acute myocardial infarction"
+         "Unspecified fracture of shaft of humerus, right arm, sequela" → "fracture of shaft of humerus, right arm"
+    """
+    bare = _ICD10_JARGON_RE.sub("", condition)
+    bare = re.sub(r"[\s,;]+", " ", bare).strip().strip(",").strip()
+    return bare if bare else condition  # fallback to original if everything was stripped
+
+
 def _gather_evidence(rule: dict) -> dict:
     """Fetch PMC co-occurrence and DuckDuckGo snippets for a single rule.
 
@@ -317,7 +362,8 @@ def _gather_evidence(rule: dict) -> dict:
     source    = rule["source"]
 
     pmc = _pmc_cooccurrence(condition, test)
-    ddg_query = f'"{source}" guidelines {condition} {test} recommendation'
+    bare_condition = _strip_icd10_jargon(condition)
+    ddg_query = f"{source} {bare_condition} {test} guideline"
     snippets  = _ddg_web_search(ddg_query)
 
     return {
@@ -453,19 +499,35 @@ def audit(
         schema_ok.append(rule)
     print(f"\nSchema pre-filter: {len(schema_ok)} passed, {schema_dropped} dropped.\n")
 
-    # ── Pass 0: Evidence Grounding ────────────────────────────────────────────
+    # ── Pass 1: Name Normalisation (first — clean names before evidence/LLM) ────
+    normalised_schema = schema_ok
+    if not skip_normalise:
+        print("=== Pass 1: Name Normalisation ===")
+        normalised_schema = []
+        total_changes = 0
+        for rule in schema_ok:
+            updated, changes = _normalise_rule(rule)
+            if changes:
+                total_changes += len(changes)
+                for c in changes:
+                    print(f"  [normalise] {c}")
+            normalised_schema.append(updated)
+            time.sleep(0.05)  # gentle rate limiting on NLM / OLS4
+        print(f"\nNormalisation complete: {total_changes} field(s) updated.\n")
+
+    # ── Pass 2: Evidence Grounding ────────────────────────────────────────────
     evidence_by_rule: dict[int, dict] = {}
     flagged_rules: list[dict] = []
-    rules_for_verification = schema_ok
+    rules_for_verification = normalised_schema
 
     if grounding:
         _load_grounding_checkpoint()
-        print("=== Pass 0: Evidence Grounding ===")
+        print("=== Pass 2: Evidence Grounding ===")
         low_evidence_indices: set[int] = set()
 
-        for i, rule in enumerate(schema_ok):
+        for i, rule in enumerate(normalised_schema):
             label = f"{rule['condition']} → {rule['test']}"
-            print(f"  [{i + 1}/{len(schema_ok)}] {label}")
+            print(f"  [{i + 1}/{len(normalised_schema)}] {label}")
             ev = _gather_evidence(rule)
             evidence_by_rule[i] = ev
             print(f"    PMC: {ev['pmc_articles']} articles, {ev['pmc_patents']} patents"
@@ -474,10 +536,10 @@ def audit(
                 low_evidence_indices.add(i)
 
         if flag_low_evidence and low_evidence_indices:
-            flagged_rules = [schema_ok[i] for i in sorted(low_evidence_indices)]
-            surviving_indices = [i for i in range(len(schema_ok)) if i not in low_evidence_indices]
-            rules_for_verification = [schema_ok[i] for i in surviving_indices]
-            # Re-index evidence_by_rule to match the new positions in rules_for_verification
+            flagged_rules = [normalised_schema[i] for i in sorted(low_evidence_indices)]
+            surviving_indices = [i for i in range(len(normalised_schema)) if i not in low_evidence_indices]
+            rules_for_verification = [normalised_schema[i] for i in surviving_indices]
+            # Re-index evidence_by_rule to match positions in rules_for_verification
             evidence_by_rule = {
                 new_i: evidence_by_rule[old_i]
                 for new_i, old_i in enumerate(surviving_indices)
@@ -486,22 +548,29 @@ def audit(
                   f"(zero PMC articles and zero web snippets), "
                   f"{len(rules_for_verification)} proceeding to verification.\n")
         else:
-            rules_for_verification = schema_ok
-            print(f"\nEvidence grounding complete: {len(schema_ok)} rules annotated.\n")
+            rules_for_verification = normalised_schema
+            print(f"\nEvidence grounding complete: {len(normalised_schema)} rules annotated.\n")
 
-    # ── Pass 1: LLM verification grouped by test ──────────────────────────────
+    # ── Pass 3: LLM Verification grouped by test ──────────────────────────────
     verified_rules = rules_for_verification
     if not skip_verify:
-        print("=== Pass 1: LLM Verification ===")
+        print("=== Pass 3: LLM Verification ===")
+        # Canonicalise test names (case-insensitive) to merge variants like
+        # "Chest X-Ray" / "Chest X-ray" into a single pathway group.
         by_test: dict[str, list[dict]] = {}
+        test_display: dict[str, str] = {}  # norm_key → representative display name
         for rule in rules_for_verification:
-            by_test.setdefault(rule["test"], []).append(rule)
+            key = rule["test"].strip().lower()
+            by_test.setdefault(key, []).append(rule)
+            if key not in test_display:
+                test_display[key] = rule["test"].strip()
 
         # Build a reverse lookup so we can find each rule's index in rules_for_verification
         rule_index: dict[int, int] = {id(r): i for i, r in enumerate(rules_for_verification)}
 
         verified_rules = []
-        for test_name, group in by_test.items():
+        for norm_key, group in by_test.items():
+            test_name = test_display[norm_key]
             print(f"  Verifying pathway '{test_name}' ({len(group)} rules)...")
             # Build a local evidence map keyed by position within this group
             group_evidence: dict[int, dict] | None = None
@@ -518,22 +587,6 @@ def audit(
         total_dropped = len(rules_for_verification) - len(verified_rules)
         print(f"\nVerification complete: {len(verified_rules)} rules kept, {total_dropped} removed.\n")
 
-    # ── Pass 2: Name normalisation ────────────────────────────────────────────
-    normalised_rules = verified_rules
-    if not skip_normalise:
-        print("=== Pass 2: Name Normalisation ===")
-        normalised_rules = []
-        total_changes = 0
-        for rule in verified_rules:
-            updated, changes = _normalise_rule(rule)
-            if changes:
-                total_changes += len(changes)
-                for c in changes:
-                    print(f"  [normalise] {c}")
-            normalised_rules.append(updated)
-            time.sleep(0.05)  # gentle rate limiting on NLM / OLS4
-        print(f"\nNormalisation complete: {total_changes} field(s) updated.\n")
-
     # ── Write flagged_rules.json ──────────────────────────────────────────────
     flagged_json_path = os.path.join(
         os.path.dirname(os.path.abspath(rules_json_path)),
@@ -549,7 +602,7 @@ def audit(
 
     # ── Summary ───────────────────────────────────────────────────────────────
     original_count  = len(rules)
-    surviving_count = len(normalised_rules)
+    surviving_count = len(verified_rules)
     print("=== Summary ===")
     print(f"  Original rules  : {original_count}")
     print(f"  Flagged         : {len(flagged_rules)}")
@@ -564,7 +617,7 @@ def audit(
     # their corresponding pathway comment.
     output: list[dict] = []
     by_test_final: dict[str, list[dict]] = {}
-    for rule in normalised_rules:
+    for rule in verified_rules:
         by_test_final.setdefault(rule["test"], []).append(rule)
 
     # Emit comment blocks in original order, followed by their surviving rules
