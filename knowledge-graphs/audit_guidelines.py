@@ -187,7 +187,6 @@ def _verify_group(
     try:
         response = _CLIENT.chat.completions.create(
             model=_deployment,
-            temperature=0,   # deterministic output — prevents run-to-run stochastic variation
             messages=[
                 {"role": "system", "content": system_prefix + VERIFICATION_PROMPT},
                 {"role": "user", "content": (
