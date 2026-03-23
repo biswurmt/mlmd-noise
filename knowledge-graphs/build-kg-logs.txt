@@ -5,36 +5,14 @@ Looking up LOINC codes via UMLS...
 Looking up ICD-10-CM codes via NLM Clinical Tables...
   Acute myocardial infarction, unspecified → I21.9
   Cardiac arrhythmia, unspecified → I49.9
+  Ac Acute myocardial infarction, unspecified → I21.9
+  Neonatal tachycardia → P29.11
+  Neonatal bradycardia → P29.12
+  Hypertensive Emergency → I16.1
+  Cardiogenic Shock → R57.0
   Testicular Torsion → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/N44.02
   Epididymitis → N45.1
-  Unspecified fracture of shaft of humerus, right arm, sequela → S42.301S
   Unspecified acute appendicitis → K35.80
-  Torsion of right ovary and ovarian pedicle → N83.511
-  Other ectopic pregnancy without intrauterine pregnancy → O00.80
-  Ovarian Cancer → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/C56
-  Adnexal Mass → not found
-  Ruptured Ovarian Cyst → not found
-  Acute pulmonary edema → J81.0
-  Malignant pleural effusion → J91.0
-  Lung Cancer → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/C34.90
-  Pneumocystis jirovecii pneumonia (PJP) → not found
-  Pulmonary tuberculosis → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/A15
-  Chronic pneumothorax → J93.81
-  Lung cancer → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/C34.90
-  Unspecified systolic (congestive) heart failure → I50.20
-  Unspecified fracture of skull, sequela → S02.91XS
-  Nontraumatic intracerebral hemorrhage, intraventricular → I61.5
-  Subdural Hematoma → not found
-  Acute Coronary Syndrome → not found
-  Meningococcal pericarditis → A39.53
-  Pulmonary edema secondary to heart failure → not found
-  Acute decompensated heart failure with pulmonary edema → not found
-  Pulmonary Tuberculosis → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/A15
-  Lung Cancer (occult thoracic pathology) → not found
-  Iron deficiency anemia, unspecified → D50.9
-  Anemia of chronic kidney disease → https://uts-ws.nlm.nih.gov/rest/content/2025AB/source/ICD10CM/D63.1
-  Febrile neutropenia → not found
-  Thrombocytopenia, unspecified → D69.6
 Looking up RxNorm and OpenFDA data for treatments...
 Fetching Europe PMC literature breakdown (symptom ↔ condition)...
 Fetching Europe PMC literature breakdown (condition ↔ test)...
@@ -42,14 +20,14 @@ Fetching Europe PMC literature breakdown (symptom ↔ test)...
 Fetching ClinicalTrials.gov trial counts...
 
 Knowledge graph saved to '/home/achua/mlmd-noise/knowledge-graphs/triage_knowledge_graph.pkl'
-  Nodes : 92
-  Edges : 139
+  Nodes : 38
+  Edges : 58
 
 --- Node Inspection ---
-  [Symptom: Chest Pain] -> {'type': 'Symptom', 'ebi_open_code': None, 'snomed_ca_code': '29857009', 'synonyms': [], 'test_evidence': [{'test': 'ECG', 'articles': 52589, 'patents': 9}, {'test': '12-Lead ECG', 'articles': 27603, 'patents': 0}]}
-  [Risk Factor: Hypertension] NOT FOUND
+  [Symptom: Chest Pain] -> {'type': 'Symptom', 'ebi_open_code': None, 'snomed_ca_code': '29857009', 'synonyms': [], 'test_evidence': [{'test': 'ECG', 'articles': 52589, 'patents': 9}]}
+  [Risk Factor: Hypertension] -> {'type': 'Risk_Factor', 'ebi_open_code': 'MONDO_0005044', 'snomed_ca_code': '38341003', 'synonyms': [], 'test_evidence': [{'test': 'ECG', 'articles': 97607, 'patents': 9}]}
   [MOI: Fall On Outstretched Hand] NOT FOUND
-  [Attribute: Rebound Tenderness] NOT FOUND
+  [Attribute: Rebound Tenderness] -> {'type': 'Clinical_Attribute', 'ebi_open_code': None, 'snomed_ca_code': '35611005', 'synonyms': [], 'test_evidence': [{'test': 'Appendix Ultrasound', 'articles': 1303, 'patents': 0}]}
   [Attribute: Sudden Pain Onset] -> {'type': 'Clinical_Attribute', 'ebi_open_code': None, 'snomed_ca_code': '367327000', 'synonyms': [], 'test_evidence': [{'test': 'Testicular Ultrasound', 'articles': 1049, 'patents': 0}]}
   [Demographic: Female Of Childbearing Age] NOT FOUND
 
@@ -60,9 +38,7 @@ Knowledge graph saved to '/home/achua/mlmd-noise/knowledge-graphs/triage_knowled
   [Test: Testicular Ultrasound]
     source       : ACR
     guideline_url: https://acsearch.acr.org/docs/69363/Narrative
-  [Test: Arm X-Ray]
-    source       : ACR
-    guideline_url: https://acsearch.acr.org/docs/69418/narrative/
+  [Test: Arm X-Ray] NOT FOUND
   [Test: Appendix Ultrasound]
     source       : ACR
     guideline_url: https://acsearch.acr.org/docs/69357/narrative/
@@ -90,10 +66,10 @@ Knowledge graph saved to '/home/achua/mlmd-noise/knowledge-graphs/triage_knowled
   EDGE NOT FOUND: (Condition: Wrist Fracture) -> (Treatment: Ibuprofen)
 
 --- LOINC & ICD-10 Code Verification ---
-  [Test: ECG]  loinc_code=nan
-  [Test: Arm X-Ray]  loinc_code=nan
-  [Test: Appendix Ultrasound]  loinc_code=nan
-  [Test: Testicular Ultrasound]  loinc_code=nan
+  [Test: ECG]  loinc_code=None
+  [Test: Arm X-Ray] NOT FOUND
+  [Test: Appendix Ultrasound]  loinc_code=None
+  [Test: Testicular Ultrasound]  loinc_code=None
   [Condition: Acute Myocardial Infarction] NOT FOUND
   [Condition: Arm Fracture] NOT FOUND
   [Condition: Wrist Fracture] NOT FOUND
