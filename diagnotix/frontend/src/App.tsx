@@ -204,9 +204,13 @@ export default function App() {
           {/* ── Pipeline info ── */}
           <p className="sidebar-title">Pipeline</p>
           <ol className="pipeline-steps">
-            <li>Gemini extracts 8–15 triage rules</li>
-            <li>Rules appended to JSON store</li>
-            <li>Multi-ontology grounding (EBI, Infoway)</li>
+            <li>Azure OpenAI extracts 8–15 triage rules</li>
+            <li>Schema validation (node type + guideline source)</li>
+            <li>
+              Multi-ontology grounding: conditions via ICD-10-CM (NLM), symptoms via HP/MONDO (EMBL-EBI OLS4), SNOMED CT (Infoway), evidence from Europe PMC
+            </li>
+            <li>LLM clinical review → regenerate dropped rules (up to 3× iterations)</li>
+            <li>Rules appended to guideline_rules.json</li>
             <li>NetworkX graph rebuilt</li>
             <li>New cluster appended live</li>
           </ol>
