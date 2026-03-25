@@ -16,6 +16,7 @@
 \usepackage{fontawesome5}
 \usepackage{multirow}
 \usepackage{array}
+\usepackage{graphicx}
 
 % ── Colours ──────────────────────────────────────────────────────────────────
 \definecolor{symptom}    {HTML}{E57373}   % red
@@ -76,43 +77,6 @@
 \end{frame}
 
 % =============================================================================
-\section{Motivation}
-% =============================================================================
-
-\begin{frame}{The Clinical Problem}
-  \begin{columns}[T]
-    \begin{column}{0.55\textwidth}
-      \textbf{Emergency Department triage is time-critical}
-      \begin{itemize}
-        \item Clinicians must rapidly map presenting symptoms to the right
-              diagnostic test under cognitive and time pressure.
-        \item Clinical guidelines (AHA/ACC, ACR, NICE, CTAS) encode
-              evidence-based rules --- but they are dispersed across
-              long PDFs and multiple organisations.
-        \item LLMs alone can \emph{hallucinate} clinical pathways; they
-              lack grounded, citable reasoning.
-      \end{itemize}
-      \vspace{0.5em}
-      \textbf{Our answer: a knowledge graph as the ground truth layer.}
-    \end{column}
-    \begin{column}{0.42\textwidth}
-      \begin{block}{Target pathways}
-        \begin{tabular}{ll}
-          \faHeartbeat    & ECG \\
-          \faSearch       & Testicular Ultrasound \\
-          \faBone         & Arm X-Ray \\
-          \faNotesMedical & Abdominal Ultrasound \\
-          \faNotesMedical & Appendix Area Ultrasound \\
-        \end{tabular}
-      \end{block}
-      \begin{block}{Guideline sources}
-        \small AHA/ACC \quad ACR \quad NICE \quad CTAS
-      \end{block}
-    \end{column}
-  \end{columns}
-\end{frame}
-
-% =============================================================================
 \section{System Architecture}
 % =============================================================================
 
@@ -138,7 +102,7 @@
       {\textbf{Diagnotix}\\{\tiny React + FastAPI}};
 
     \node[box, fill=symptom!60, below=of pkl] (pipe)
-      {Patient Mapper\\{\tiny CSV enrichment}};
+      {Label Imputation\\{\tiny CSV enrichment}};
 
     \node[box, fill=attribute!60, below=of build] (audit)
       {Audit Pipeline\\{\tiny LLM audit}};
@@ -156,52 +120,12 @@
   Rules are iteratively audited and revised until satisfactory, then
   the graph builder serialises the final graph. The graph store
   powers \textbf{Diagnotix} for dynamic expansion and
-  the patient mapper for CSV enrichment.
+  label imputation for CSV enrichment.
 \end{frame}
 
 % =============================================================================
 \section{Knowledge Graph Construction}
 % =============================================================================
-
-\begin{frame}[fragile]{Source of Truth: The Clinical Rule Store}
-  Each of the 45 rules encodes a single clinical assertion:
-
-  \vspace{0.3em}
-  \begin{center}
-    \texttt{raw\_symptom} \;\(\longrightarrow\)\; \texttt{condition} \;\(\longrightarrow\)\; \texttt{test}
-  \end{center}
-
-  \vspace{0.3em}
-  \begin{columns}[T]
-    \begin{column}{0.48\textwidth}
-      \begin{exampleblock}{Example rule (JSON)}
-        \begin{lstlisting}[language={}]
-{
-  "raw_symptom": "chest pain",
-  "node_type": "Symptom",
-  "condition": "Acute MI",
-  "test": "ECG",
-  "source": "AHA/ACC"
-}
-        \end{lstlisting}
-      \end{exampleblock}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{block}{Rule fields}
-        \small
-        \begin{tabular}{@{}ll@{}}
-          \textbf{Field}      & \textbf{Meaning} \\
-          \midrule
-          \texttt{raw\_symptom} & Clinical entity \\
-          \texttt{node\_type}   & KG category \\
-          \texttt{condition}    & Target diagnosis \\
-          \texttt{test}         & Recommended test \\
-          \texttt{source}       & Guideline body \\
-        \end{tabular}
-      \end{block}
-    \end{column}
-  \end{columns}
-\end{frame}
 
 \begin{frame}{10-Step Enrichment Pipeline (Graph Builder)}
   \scriptsize
@@ -228,52 +152,10 @@
   scaling in the HTML visualisation.
 \end{frame}
 
-\begin{frame}{Graph Schema}
-  \begin{columns}[T]
-    \begin{column}{0.44\textwidth}
-      \textbf{Primary node types}\\[0.4em]
-      \begin{tabular}{@{}ll@{}}
-        \nodebox{symptom!80}{Symptom}     & \texttt{Symptom:} \\[2pt]
-        \nodebox{condition!80}{Condition} & \texttt{Condition:} \\[2pt]
-        \nodebox{testcol!80}{Test}        & \texttt{Test:} \\
-      \end{tabular}
-
-      \vspace{0.6em}
-      \textbf{Secondary node types}\\[0.4em]
-      \begin{tabular}{@{}ll@{}}
-        \nodebox{vital!80}{Vital}            & \texttt{Vital:} \\[2pt]
-        \nodebox{demo!70}{Demographic}       & \texttt{Demographic:} \\[2pt]
-        \nodebox{riskfactor!80}{Risk Factor} & \texttt{Risk Factor:} \\[2pt]
-        \nodebox{moi!70}{MOI}                & \texttt{MOI:} \\[2pt]
-        \nodebox{attribute!80}{Attribute}    & \texttt{Attribute:} \\[2pt]
-        \nodebox{treatment!80}{Treatment}    & \texttt{Treatment:} \\
-      \end{tabular}
-    \end{column}
-    \begin{column}{0.53\textwidth}
-      \textbf{Edge types}\\[0.4em]
-      \begin{tabular}{@{}ll@{}}
-        \texttt{INDICATES\_CONDITION}     & entity \(\to\) condition \\[2pt]
-        \texttt{REQUIRES\_TEST}           & condition \(\to\) test \\[2pt]
-        \texttt{DIRECTLY\_INDICATES\_TEST}& entity \(\to\) test \\[2pt]
-        \texttt{RECOMMENDS\_TREATMENT}    & condition \(\to\) drug \\
-      \end{tabular}
-
-      \vspace{0.8em}
-      \textbf{Edge metadata on every edge:}
-      \begin{itemize}
-        \item \texttt{source} --- guideline body (AHA/ACC, ACR, \ldots)
-        \item \texttt{source\_url} --- citable DOI or page URL
-        \item evidence weight (literature / trial count)
-      \end{itemize}
-    \end{column}
-  \end{columns}
-\end{frame}
-
 % =============================================================================
 \section{Guideline Audit Pipeline}
 % =============================================================================
 
-% ── Audit slide 1: pipeline overview ─────────────────────────────────────────
 \begin{frame}{Audit Pipeline Overview}
   \textbf{Problem:} LLM-generated rules can be fabricated, vague, or misattributed.
   The audit pipeline cleans the rule store before the graph is built.
@@ -333,7 +215,183 @@
   \end{columns}
 \end{frame}
 
-% ── Audit slide 2: evidence grounding + verification detail ───────────────────
+% =============================================================================
+\section{Diagnotix Web Application}
+% =============================================================================
+
+\begin{frame}{Diagnotix --- Interactive Knowledge Graph Explorer}
+  \centering
+  \includegraphics[width=0.95\linewidth]{images/webapp-ss.png}
+\end{frame}
+
+% =============================================================================
+\section{Summary}
+% =============================================================================
+
+\begin{frame}{Summary}
+  \small
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \textbf{What we built}
+      \begin{itemize}
+        \item An expandable knowledge graph spanning 5 clinical
+              pathways, grounded in evidence-based guidelines.
+        \item 10-step ontology enrichment pipeline (SNOMED CT CA,
+              LOINC, ICD-10 international, ICD-10-CA, HP/MONDO,
+              RxNorm, Europe PMC, ClinicalTrials.gov).
+        \item Evidence-grounded audit pipeline: Europe PMC +
+              web search evidence tiers inform LLM verification
+              to reduce hallucinated rule retention.
+        \item Two-phase data processing pipeline for back-mapping
+              patient diagnoses to recommended diagnostic tests.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textbf{Future work}
+      \begin{itemize}
+        \item Continuously improve the audit pipeline to maintain
+              knowledge graph accuracy over time.
+        \item Integration with the SickKids database
+              (where feasible).
+        \item Extend from \emph{back prediction} (diagnosis
+              $\to$ test) to \emph{front prediction} --- using
+              patient vitals at triage to recommend tests,
+              grounded in the knowledge graph.
+        \item Expert clinician verification of the constructed
+              knowledge graph.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% =============================================================================
+% APPENDIX — Additional slides
+% =============================================================================
+\appendix
+
+\begin{frame}
+  \centering
+  \vspace{2em}
+  {\Large\textbf{Additional Slides}}
+\end{frame}
+
+% ── Motivation ────────────────────────────────────────────────────────────────
+\begin{frame}{The Clinical Problem}
+  \begin{columns}[T]
+    \begin{column}{0.55\textwidth}
+      \textbf{Emergency Department triage is time-critical}
+      \begin{itemize}
+        \item Clinicians must rapidly map presenting symptoms to the right
+              diagnostic test under cognitive and time pressure.
+        \item Clinical guidelines (AHA/ACC, ACR, NICE, CTAS) encode
+              evidence-based rules --- but they are dispersed across
+              long PDFs and multiple organisations.
+        \item LLMs alone can \emph{hallucinate} clinical pathways; they
+              lack grounded, citable reasoning.
+      \end{itemize}
+      \vspace{0.5em}
+      \textbf{Our answer: a knowledge graph as the ground truth layer.}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{block}{Target pathways}
+        \begin{tabular}{ll}
+          \faHeartbeat    & ECG \\
+          \faSearch       & Testicular Ultrasound \\
+          \faBone         & Arm X-Ray \\
+          \faNotesMedical & Abdominal Ultrasound \\
+          \faNotesMedical & Appendix Area Ultrasound \\
+        \end{tabular}
+      \end{block}
+      \begin{block}{Guideline sources}
+        \small AHA/ACC \quad ACR \quad NICE \quad CTAS
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ── Knowledge Graph Construction ──────────────────────────────────────────────
+\begin{frame}[fragile]{Source of Truth: The Clinical Rule Store}
+  Each of the 45 rules encodes a single clinical assertion:
+
+  \vspace{0.3em}
+  \begin{center}
+    \texttt{raw\_symptom} \;\(\longrightarrow\)\; \texttt{condition} \;\(\longrightarrow\)\; \texttt{test}
+  \end{center}
+
+  \vspace{0.3em}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{exampleblock}{Example rule (JSON)}
+        \begin{lstlisting}[language={}]
+{
+  "raw_symptom": "chest pain",
+  "node_type": "Symptom",
+  "condition": "Acute MI",
+  "test": "ECG",
+  "source": "AHA/ACC"
+}
+        \end{lstlisting}
+      \end{exampleblock}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{block}{Rule fields}
+        \small
+        \begin{tabular}{@{}ll@{}}
+          \textbf{Field}      & \textbf{Meaning} \\
+          \midrule
+          \texttt{raw\_symptom} & Clinical entity \\
+          \texttt{node\_type}   & KG category \\
+          \texttt{condition}    & Target diagnosis \\
+          \texttt{test}         & Recommended test \\
+          \texttt{source}       & Guideline body \\
+        \end{tabular}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Graph Schema}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      \textbf{Primary node types}\\[0.4em]
+      \begin{tabular}{@{}ll@{}}
+        \nodebox{symptom!80}{Symptom}     & \texttt{Symptom:} \\[2pt]
+        \nodebox{condition!80}{Condition} & \texttt{Condition:} \\[2pt]
+        \nodebox{testcol!80}{Test}        & \texttt{Test:} \\
+      \end{tabular}
+
+      \vspace{0.6em}
+      \textbf{Secondary node types}\\[0.4em]
+      \begin{tabular}{@{}ll@{}}
+        \nodebox{vital!80}{Vital}            & \texttt{Vital:} \\[2pt]
+        \nodebox{demo!70}{Demographic}       & \texttt{Demographic:} \\[2pt]
+        \nodebox{riskfactor!80}{Risk Factor} & \texttt{Risk Factor:} \\[2pt]
+        \nodebox{moi!70}{MOI}                & \texttt{MOI:} \\[2pt]
+        \nodebox{attribute!80}{Attribute}    & \texttt{Attribute:} \\[2pt]
+        \nodebox{treatment!80}{Treatment}    & \texttt{Treatment:} \\
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \textbf{Edge types}\\[0.4em]
+      \begin{tabular}{@{}ll@{}}
+        \texttt{INDICATES\_CONDITION}     & entity \(\to\) condition \\[2pt]
+        \texttt{REQUIRES\_TEST}           & condition \(\to\) test \\[2pt]
+        \texttt{DIRECTLY\_INDICATES\_TEST}& entity \(\to\) test \\[2pt]
+        \texttt{RECOMMENDS\_TREATMENT}    & condition \(\to\) drug \\
+      \end{tabular}
+
+      \vspace{0.8em}
+      \textbf{Edge metadata on every edge:}
+      \begin{itemize}
+        \item \texttt{source} --- guideline body (AHA/ACC, ACR, \ldots)
+        \item \texttt{source\_url} --- citable DOI or page URL
+        \item evidence weight (literature / trial count)
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ── Guideline Audit Pipeline ──────────────────────────────────────────────────
 \begin{frame}{Audit Pipeline --- Evidence Grounding \& Verification}
   \begin{columns}[T]
     \begin{column}{0.48\textwidth}
@@ -384,11 +442,7 @@
   \end{columns}
 \end{frame}
 
-
-% =============================================================================
-\section{Data Processing Pipeline}
-% =============================================================================
-
+% ── Data Processing Pipeline ──────────────────────────────────────────────────
 \begin{frame}{Data Processing Pipeline --- Two-Phase Overview}
   \textbf{Goal:} ingest a real patient CSV and enrich every diagnosis with
   KG-derived diagnostic tests.
@@ -415,15 +469,12 @@
 
   \vspace{0.5em}
   \begin{block}{Standalone mapping (graph already current)}
-    \textbf{Patient Mapper} --- skips graph expansion; semantically maps a
+    \textbf{Label Imputation} --- skips graph expansion; semantically maps a
     new patient CSV against the existing graph store via GPT-5 Nano.
   \end{block}
 \end{frame}
 
-% =============================================================================
-\section{Diagnotix Web Application}
-% =============================================================================
-
+% ── Diagnotix Web Application ─────────────────────────────────────────────────
 \begin{frame}[fragile]{Diagnotix --- Dynamic Knowledge Graph Builder}
   \begin{columns}[T]
     \begin{column}{0.52\textwidth}
@@ -457,46 +508,6 @@
         \end{tabular}\\[2pt]
         \tiny $^{*}$links to WHO ICD-10 browser
       \end{block}
-    \end{column}
-  \end{columns}
-\end{frame}
-
-% =============================================================================
-\section{Summary}
-% =============================================================================
-
-\begin{frame}{Summary}
-  \small
-  \begin{columns}[T]
-    \begin{column}{0.48\textwidth}
-      \textbf{What we built}
-      \begin{itemize}
-        \item An expandable knowledge graph spanning 5 clinical
-              pathways, grounded in evidence-based guidelines.
-        \item 10-step ontology enrichment pipeline (SNOMED CT CA,
-              LOINC, ICD-10 international, ICD-10-CA, HP/MONDO,
-              RxNorm, Europe PMC, ClinicalTrials.gov).
-        \item Evidence-grounded audit pipeline: Europe PMC +
-              web search evidence tiers inform LLM verification
-              to reduce hallucinated rule retention.
-        \item Two-phase data processing pipeline for back-mapping
-              patient diagnoses to recommended diagnostic tests.
-      \end{itemize}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \textbf{Future work}
-      \begin{itemize}
-        \item Continuously improve the audit pipeline to maintain
-              knowledge graph accuracy over time.
-        \item Integration with the SickKids database
-              (where feasible).
-        \item Extend from \emph{back prediction} (diagnosis
-              $\to$ test) to \emph{front prediction} --- using
-              patient vitals at triage to recommend tests,
-              grounded in the knowledge graph.
-        \item Expert clinician verification of the constructed
-              knowledge graph.
-      \end{itemize}
     \end{column}
   \end{columns}
 \end{frame}
