@@ -85,7 +85,7 @@
   LMP2392H --- Healthcare and Medicine for AI Experts\\[0.3em]
   \small Supervisor: Anna Goldenberg \quad Co-supervisor: Ismail Akrout
 }
-\date{Progress Report --- \today}
+\date{Progress report --- \today}
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{document}
@@ -169,10 +169,20 @@
       \end{itemize}
     \end{column}
     \begin{column}{0.44\textwidth}
-      \begin{block}{Diagnosis field}
+      \begin{block}{Diagnosis field (\texttt{dx})}
         \small
-        Free-text \texttt{dx} column with semicolon-separated
-        diagnoses (manual clinician input).
+        Free-text column with semicolon-separated diagnoses
+        (manual clinician input, post-assessment).\\[0.3em]
+        Our label imputation pipeline extracts this field
+        to build the diagnosis$\to$test mapping.
+      \end{block}
+
+      \vspace{0.4em}
+      \begin{block}{High transfer rate}
+        \small
+        SickKids receives many transfers from community
+        hospitals; tests performed at referring sites
+        are the primary source of false-negative labels.
       \end{block}
     \end{column}
   \end{columns}
@@ -186,32 +196,34 @@
   \begin{columns}[T]
     \begin{column}{0.48\textwidth}
       \textbf{LLMs + knowledge graphs}
-      \begin{itemize}
-        \item \textbf{Yao et al.\ (2025):} LLMs can impute
-              diagnosis$\to$test associations; evaluation-based
-              validation reduces hallucination risk.
+      \begin{itemize}\footnotesize
+        \item \textbf{Yao et al.\ (2025):} LLMs imputing
+              disease$\to$treatment edges in medical KGs show
+              low recall and hallucinations, motivating
+              KG-grounded evaluation.
         \item \textbf{Li et al.\ (2025):} Knowledge-conditioned LLMs
               improve accuracy of clinical data extraction.
         \item \textbf{Cao et al.\ (2026):} LLM-powered knowledge
               graphs enable real-time clinical analytics at scale
               (JAMIA Open).
-        \item \textbf{Islam et al.\ (2025):} LLM prompt ensembles
-              extract medical entities from EHR free text.
+        \item \textbf{Han et al.\ (2026):} Denoise2Impute ---
+              distinguishes true negatives from unknown-missing
+              positives to recover missing diagnosis codes in EHRs.
       \end{itemize}
     \end{column}
     \begin{column}{0.48\textwidth}
       \textbf{Noise-robust training}
-      \begin{itemize}
-        \item \textbf{Moturu, Goldenberg \& Taati (2025):}
-              LiLAW --- 3 learnable parameters adapt per-sample
-              loss weights via bilevel optimisation. SOTA on
-              noisy medical imaging benchmarks.
-        \item \textbf{Ren et al.\ (2018):} Meta-learning to
-              reweight training examples; foundational approach
-              for learning from noisy labels.
-        \item \textbf{Northcutt et al.\ (2021):} Confident
-              Learning --- characterising and filtering
-              label errors using predicted probabilities.
+      \begin{itemize}\footnotesize
+        \item \textbf{Yang et al.\ (2024):} CV-style label noise
+              techniques (label smoothing, MixUp, NCR) improve EHR
+              classifiers under asymmetric false-positive/negative rates.
+        \item \textbf{Ren et al.\ (2018):} Meta-learning to reweight
+              training examples; foundational approach for noisy labels.
+        \item \textbf{Northcutt et al.\ (2021):} Confident Learning ---
+              characterising and filtering label errors using predicted
+              probabilities.
+        \item \textbf{Moturu et al.\ (2025):} LiLAW --- 3 learnable
+              parameters adapt per-sample weights via bilevel optimisation.
       \end{itemize}
     \end{column}
   \end{columns}
@@ -226,7 +238,7 @@
   \vspace{0.5em}
   \begin{columns}[c]
     \begin{column}{0.44\textwidth}
-      \begin{block}{\centering Track 1 --- Label imputation}
+      \begin{block}{\centering Label imputation}
         \small
         \textbf{Goal:} clean the training data.\\[0.3em]
         Build a knowledge graph from clinical guidelines;
@@ -237,7 +249,7 @@
       \end{block}
     \end{column}
     \begin{column}{0.44\textwidth}
-      \begin{block}{\centering Track 2 --- LiLAW training}
+      \begin{block}{\centering Robust training}
         \small
         \textbf{Goal:} train robustly on residual noise.\\[0.3em]
         Meta-learn per-sample loss weights that
@@ -251,10 +263,10 @@
 \end{frame}
 
 % =============================================================================
-\section{KG track}
+\section{Label imputation}
 % =============================================================================
 
-\begin{frame}{KG track: end-to-end pipeline}
+\begin{frame}{Label imputation: end-to-end pipeline}
   \centering
   \begin{tikzpicture}[
     node distance=0.7cm and 1.1cm,
@@ -298,7 +310,7 @@
   \end{enumerate}
 \end{frame}
 
-\begin{frame}[fragile]{KG track: from rules to enriched graph}
+\begin{frame}[fragile]{Label imputation: from rules to enriched graph}
   \begin{columns}[T]
     \begin{column}{0.47\textwidth}
       \vspace{0.2em}
@@ -322,7 +334,7 @@
     \hfill
     \begin{column}{0.49\textwidth}
       \vspace{0.2em}
-      \textbf{Enrichment pipeline} {\scriptsize(10 steps)}\\[0.4em]
+      \textbf{Enrichment pipeline}\\[0.4em]
       \scriptsize
       \begin{tabular}{@{}cll@{}}
         \toprule
@@ -347,58 +359,63 @@
   \end{columns}
 \end{frame}
 
-\begin{frame}{KG track: validating LLM-generated rules}
+\begin{frame}{Label imputation: validating LLM-generated rules}
   Our audit pipeline cleans LLM-generated rules before the graph is built.
 
-  \vspace{0.4em}
+  \vspace{0.3em}
   \centering
   \begin{tikzpicture}[
-    node distance=0.4cm and 0.5cm,
+    node distance=0.5cm and 0.8cm,
     box/.style={draw, rounded corners, fill=lightgray,
-                text width=2.2cm, align=center, minimum height=0.9cm,
-                font=\scriptsize},
-    annot/.style={font=\tiny, text width=2.2cm, align=center,
+                text width=3.8cm, align=center, minimum height=0.9cm,
+                font=\small},
+    annot/.style={font=\scriptsize, text width=3.8cm, align=center,
                   text=black!70},
     arr/.style={-{Latex[length=2.5mm]}, thick, color=midblue},
   ]
+    % Row 1 (left-to-right), captions above
     \node[box, fill=riskfactor!70] (pre)
       {\textbf{Filter \& dedup}};
     \node[box, fill=vital!60, right=of pre] (norm)
       {\textbf{Normalise}};
     \node[box, fill=condition!60, right=of norm] (ground)
       {\textbf{Ground}};
-    \node[box, fill=testcol!70, right=of ground] (verify)
+
+    \node[annot, above=0.15cm of pre]
+      {Drop missing fields, unknown sources, exact duplicates};
+    \node[annot, above=0.15cm of norm]
+      {Map to ICD-10 (UMLS) and HP/MONDO (OLS4) before LLM review};
+    \node[annot, above=0.15cm of ground]
+      {Europe PMC counts + web snippets; tag by evidence tier};
+
+    % Row 2 (right-to-left), captions below
+    \node[box, fill=testcol!70, below=0.9cm of ground] (verify)
       {\textbf{Verify}};
-    \node[box, fill=symptom!50, right=of verify] (out)
+    \node[box, fill=symptom!50, left=of verify] (out)
       {\textbf{Clean rules}};
+
+    \node[annot, below=0.15cm of verify]
+      {LLM reviews batches of $\leq$15; evidence tier sets retention bias};
 
     \draw[arr] (pre)    -- (norm);
     \draw[arr] (norm)   -- (ground);
     \draw[arr] (ground) -- (verify);
     \draw[arr] (verify) -- (out);
-
-    % Annotations below each node
-    \node[annot, below=0.15cm of pre]
-      {Drop missing fields,\\unknown sources,\\exact duplicates};
-    \node[annot, below=0.15cm of norm]
-      {Map to ICD-10 (UMLS)\\and HP/MONDO (OLS4)\\before LLM review};
-    \node[annot, below=0.15cm of ground]
-      {Europe PMC counts\\+ web snippets;\\tag by evidence tier};
-    \node[annot, below=0.15cm of verify]
-      {LLM reviews batches\\of $\leq$15; evidence tier\\sets retention bias};
   \end{tikzpicture}
 \end{frame}
 
-\begin{frame}{KG track: Diagnotix web application}
+\begin{frame}{Label imputation: Diagnotix web application}
   \centering
-  \includegraphics[width=0.85\linewidth]{images/webapp-ss.png}
+  \small Enter any diagnostic test; the system generates and audits
+  evidence-based triage rules and adds them to the knowledge graph.\\[0.6em]
+  \includegraphics[width=0.75\linewidth]{images/webapp-ss.png}
 \end{frame}
 
 % =============================================================================
-\section{LiLAW track}
+\section{Robust training}
 % =============================================================================
 
-\begin{frame}{LiLAW track: learning to down-weight noise}
+\begin{frame}{Robust training: learning to down-weight noise}
   \begin{columns}[T]
     \begin{column}{0.52\textwidth}
       \textbf{Core idea}
@@ -434,7 +451,7 @@
         \begin{itemize}
           \item Only 3 extra parameters
           \item 1 extra fwd/bwd pass per batch
-          \item No clean validation set required
+          \item No specially curated clean validation set required
         \end{itemize}
       \end{block}
     \end{column}
@@ -468,7 +485,7 @@
       \end{itemize}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \textbf{Additional validation of KG track}
+      \textbf{Additional validation of label imputation}
 
       \vspace{0.3em}
       \begin{block}{Label recovery benchmark}
@@ -505,7 +522,7 @@
       \end{itemize}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \textbf{Remaining steps}
+      \textbf{Remaining}
       \begin{enumerate}
         \item Complete label imputation pipeline\\
               {\small (dx $\to$ KG $\to$ recovered labels)}
@@ -551,7 +568,7 @@
 \end{frame}
 
 % ── Limitations ──────────────────────────────────────────────────────────────
-\begin{frame}{Limitations and risk factors}
+\begin{frame}{Limitations}
   \begin{columns}[T]
     \begin{column}{0.48\textwidth}
       \textbf{Label imputation}
@@ -582,7 +599,7 @@
 \end{frame}
 
 % ── Audit detail ─────────────────────────────────────────────────────────────
-\begin{frame}{Audit detail --- evidence grounding and verification}
+\begin{frame}{Audit pipeline: evidence grounding and LLM verification (passes 2--3)}
   \begin{columns}[T]
     \begin{column}{0.48\textwidth}
       \begin{block}{Pass 2 --- Evidence grounding}
@@ -632,7 +649,7 @@
 \end{frame}
 
 % ── Full graph schema ────────────────────────────────────────────────────────
-\begin{frame}{Graph schema (full)}
+\begin{frame}{Knowledge graph schema}
   \begin{columns}[T]
     \begin{column}{0.44\textwidth}
       \textbf{Primary node types}\\[0.4em]
@@ -674,7 +691,7 @@
 \end{frame}
 
 % ── Diagnotix detail ─────────────────────────────────────────────────────────
-\begin{frame}[fragile]{Diagnotix --- dynamic knowledge graph builder}
+\begin{frame}[fragile]{Diagnotix: dynamic knowledge graph builder}
   \begin{columns}[T]
     \begin{column}{0.52\textwidth}
       \textbf{Full-stack web application (FastAPI + React)}
@@ -712,7 +729,7 @@
 \end{frame}
 
 % ── Full enrichment table ────────────────────────────────────────────────────
-\begin{frame}{10-step enrichment pipeline (full)}
+\begin{frame}{Ontology enrichment pipeline}
   \scriptsize
   \begin{tabular}{@{}clll@{}}
     \toprule
@@ -738,7 +755,7 @@
 \end{frame}
 
 % ── Label imputation pipeline detail ─────────────────────────────────────────
-\begin{frame}{Label imputation pipeline (detail)}
+\begin{frame}{Label imputation pipeline}
   \textbf{Goal:} extract a diagnostic taxonomy from training data,
   feed it to the KG, and recover missing test labels.
 
