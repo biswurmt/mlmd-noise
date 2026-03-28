@@ -27,40 +27,60 @@ The backend imports `generate_knowledge_graph()` directly from
 
 ## Setup
 
-### 1. Add your Anthropic API key
+### 1. Create and activate venv
 
-Add `ANTHROPIC_API_KEY` to `knowledge-graphs/.env`:
-
-```
-ANTHROPIC_API_KEY=sk-ant-...
-INFOWAY_CLIENT_ID=...
-INFOWAY_CLIENT_SECRET=...
+```bash
+cd diagnotix
+python3 -m venv venv
+source venv/bin/activate
 ```
 
 ### 2. Install Python dependencies
 
-```bash
-# From the project root, using the existing venv:
-source .venv/bin/activate
-pip install fastapi "uvicorn[standard]" anthropic
-```
-
-Or install everything from the diagnotix requirements file:
+Install diagnotix requirements:
 
 ```bash
-pip install -r diagnotix/requirements.txt
+pip install -r requirements.txt
 ```
 
-### 3. Start the backend
+Then install knowledge-graphs dependencies (needed by the backend to load audit_guidelines):
+
+```bash
+pip install -r ../knowledge-graphs/requirements.txt
+```
+
+### 3. Configure environment
+
+Add credentials to `knowledge-graphs/.env`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Azure OpenAI (required for audit pipeline)
+ENDPOINT_URL=https://your-resource.openai.azure.com/
+DEPLOYMENT_NAME=your-deployment-name
+
+# Optional: Other ontology APIs
+INFOWAY_CLIENT_ID=...
+INFOWAY_CLIENT_SECRET=...
+UMLS_API_KEY=...
+```
+
+The backend will not start without `ENDPOINT_URL` and `DEPLOYMENT_NAME` (even if unused by your workflow).
+
+### 4. Start the backend
 
 ```bash
 cd diagnotix
+source venv/bin/activate
 uvicorn backend.main:app --reload --port 8000
 ```
 
 Verify: `curl http://localhost:8000/health` → `{"status":"ok"}`
 
-### 4. Start the frontend
+### 5. Start the frontend
+
+In a separate terminal:
 
 ```bash
 cd diagnotix/frontend
@@ -68,7 +88,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser.
+Open `http://localhost:5173` in your browser (or `5174+` if port is in use).
 
 ## Usage
 
@@ -99,6 +119,27 @@ Content-Type: application/json
   "message": "Added 11 rules for 'CT Head'. Graph rebuilt: 98 nodes, 247 edges."
 }
 ```
+
+## Troubleshooting
+
+**Backend fails to start with `ModuleNotFoundError`:**
+- Ensure you've installed both `diagnotix/requirements.txt` AND `knowledge-graphs/requirements.txt`
+- Run `pip install beautifulsoup4 openai azure-identity` explicitly if issues persist
+
+**Backend fails with `ValueError: ENDPOINT_URL / DEPLOYMENT_NAME missing`:**
+- Add placeholder values to `knowledge-graphs/.env` if you don't have Azure OpenAI credentials:
+  ```
+  ENDPOINT_URL=https://placeholder.openai.azure.com/
+  DEPLOYMENT_NAME=placeholder
+  ```
+
+**Frontend port conflict:**
+- If port 5173 is in use, Vite will automatically use 5174 (or higher)
+- Check `npm run dev` output to see the actual port
+
+**Graph pickle file not loading:**
+- Ensure `knowledge-graphs/triage_knowledge_graph.pkl` exists
+- Regenerate with: `cd knowledge-graphs && python build_kg.py`
 
 ## Visualising the Updated Graph
 
