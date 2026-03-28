@@ -26,7 +26,7 @@ class TrainConfig:
     alpha_init: float = 10.0
     beta_init: float = 2.0
     delta_init: float = 6.0
-    early_stopping_patience: int = 10
+    early_stopping_patience: int = 100
 
 
 @dataclass

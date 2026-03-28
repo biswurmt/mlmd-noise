@@ -1,0 +1,46 @@
+Check on the MedMNIST v2 sweep experiment running on RunPod.
+
+  What's happening
+
+  A LiLAW v2 sweep is running on RunPod (H100). It runs 18 experiments
+  (bloodmnist + dermamnist, 3 noise rates × 3 seeds, 100 epochs no early stop),
+  then pushes results to branch results/medmnist-sweep-v2 and stops itself.
+
+  Key change vs v1: early_stopping_patience=100, so the full LR schedule
+  (milestones at epochs 50 and 75) fires. This fixes the primary root cause
+  identified in v1 (model stopped at epoch 5-30, LR drops never triggered).
+
+  How to check
+
+  1. Pod status (replace POD_ID with actual ID printed at launch):
+  runpodctl pod get <POD_ID> -o json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('desiredStatus','?'))"
+    - RUNNING → still going. SSH in to check progress (see below).
+    - EXITED  → finished. Check if results were pushed.
+
+  2. If RUNNING — check progress:
+  ssh -i ~/.ssh/id_ed25519_runpod -o StrictHostKeyChecking=no root@<HOST> -p <PORT> "tail -30 /workspace/medmnist_sweep_v2_output.txt"
+  Look for [N/18] to see how many experiments are done.
+
+  3. If EXITED — check for results:
+  git fetch origin results/medmnist-sweep-v2
+    - If branch exists: git show origin/results/medmnist-sweep-v2:lilaw-poc/results/medmnist_v2/results.json
+    - If missing: experiment errored before push. Restart pod and check logs.
+
+  4. Once results retrieved, delete pod:
+  runpodctl pod delete <POD_ID>
+
+  What to look for in results
+
+  Primary check (RC1 validation):
+  - bloodmnist 0% noise baseline should reach ~98.5% (paper's reported value).
+    If our v1 got 96.4%, the 2.1% gap was due to early stopping.
+
+  Secondary check (LiLAW gains):
+  - dermamnist should show +2-5% LiLAW gain at 30-50% noise.
+    Paper reports: dermamnist 30% noise +0.27%, 50% noise +4.52%.
+
+  What to do with results
+
+  - Merge into feature/lilaw-poc: git merge origin/results/medmnist-sweep-v2
+  - Update lilaw-poc/docs/DECISIONS.md with findings (add D21).
+  - If bloodmnist baseline is still <97%, investigate further (wrong pretrained weights, etc.)

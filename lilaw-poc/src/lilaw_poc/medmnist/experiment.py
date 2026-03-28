@@ -248,4 +248,11 @@ def _print_summary(results: list[ExperimentResult]) -> None:
 
 
 if __name__ == "__main__":
-    run_sweep()
+    # v2 sweep: BloodMNIST (baseline diagnostic) + DermaMNIST (LiLAW gain verification)
+    # patience=100 in TrainConfig ensures the full LR schedule (milestones 50, 75) fires.
+    run_sweep(
+        datasets=["bloodmnist", "dermamnist"],
+        noise_rates=[0.0, 0.3, 0.5],
+        seeds=[42, 123, 456],
+        output_dir="results/medmnist_v2",
+    )
