@@ -66,7 +66,7 @@ for candidate in "${GPU_PRIORITY[@]}"; do
     --cloud-type COMMUNITY \
     --container-disk-in-gb 30 \
     --ssh \
-    -o json 2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+    -o json 2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g' || true)
   POD_ID=$(echo "${POD_JSON}" | python3 -c "
 import sys, json
 try:
