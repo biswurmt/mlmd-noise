@@ -14,49 +14,27 @@ react-force-graph uses to identify the source *node*.  We rename the
 edge attribute to "guideline_source" so the two meanings never overlap.
 """
 
-import math
 import os
 import pickle
-from typing import Any
 
 _KG_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "knowledge-graphs")
 )
 PKL_PATH = os.path.join(_KG_DIR, "triage_knowledge_graph.pkl")
 
+# When USE_NEO4J=true all three public functions dispatch to neo4j_service.
+USE_NEO4J = os.getenv("USE_NEO4J", "false").lower() == "true"
 
-def _clean(v: Any) -> Any:
-    """Recursively convert non-JSON-safe values to safe equivalents."""
-    if v is None:
-        return None
-
-    if isinstance(v, float) and math.isnan(v):
-        return None
-
-    if isinstance(v, (list, tuple)):
-        return [_clean(x) for x in v]
-
-    try:
-        import numpy as np  # noqa: F401
-        if isinstance(v, np.integer):
-            return int(v)
-        if isinstance(v, np.floating):
-            val = float(v)
-            return None if math.isnan(val) else val
-        if isinstance(v, np.ndarray):
-            return [_clean(x) for x in v.tolist()]
-        if isinstance(v, np.bool_):
-            return bool(v)
-    except ImportError:
-        pass
-
-    return v
+from backend.services.utils import _clean  # noqa: E402 — shared with neo4j_service
 
 
 def load_test_nodes() -> list[dict]:
     """Return a sorted list of {"id", "label"} dicts for every Diagnostic_Test
     node in the graph.  Returns an empty list if the PKL does not exist yet.
     """
+    if USE_NEO4J:
+        from backend.services import neo4j_service
+        return neo4j_service.load_test_nodes_neo4j()
     if not os.path.exists(PKL_PATH):
         return []
     with open(PKL_PATH, "rb") as f:
@@ -87,6 +65,9 @@ def load_graph_json(pathway: str | None = None) -> dict:
     "guideline_source" to avoid collision with the react-force-graph
     "source" field (source node ID).
     """
+    if USE_NEO4J:
+        from backend.services import neo4j_service
+        return neo4j_service.load_graph_json_neo4j(pathway)
     if not os.path.exists(PKL_PATH):
         raise FileNotFoundError(
             f"Knowledge graph not found at '{PKL_PATH}'. "
@@ -140,6 +121,9 @@ def get_existing_node_ids() -> set[str]:
     """Return the set of node IDs currently in the serialised graph.
     Returns an empty set if the PKL does not exist yet.
     """
+    if USE_NEO4J:
+        from backend.services import neo4j_service
+        return neo4j_service.get_existing_node_ids_neo4j()
     if not os.path.exists(PKL_PATH):
         return set()
     with open(PKL_PATH, "rb") as f:
