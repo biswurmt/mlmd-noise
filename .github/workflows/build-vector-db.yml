@@ -24,10 +24,13 @@ jobs:
         run: pip install qdrant-client openai python-dotenv pandas pyarrow
 
       - name: Download remaining docs from GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -L \
-            https://github.com/biswurmt/mlmd-noise/releases/download/v0.1-guidelines-data/guidelines_remaining.parquet \
-            -o guidelines_remaining.parquet
+          gh release download v0.1-guidelines-data \
+            --repo biswurmt/mlmd-noise \
+            --pattern "guidelines_remaining.parquet" \
+            --output guidelines_remaining.parquet
           echo "Downloaded $(du -sh guidelines_remaining.parquet | cut -f1)"
 
       - name: Run vector DB indexer
