@@ -7,6 +7,8 @@
 # Prerequisites:
 #   - runpodctl configured (RUNPOD_API_KEY set or ~/.runpod/config.toml)
 #   - python3 available locally (for JSON parsing)
+#   - GH_TOKEN env var set to a GitHub token with read access to this repo
+#     (repo is private; obtain via: export GH_TOKEN=$(gh auth token))
 #
 # The script is idempotent: re-running skips key generation if the key exists.
 # A new pod is always created; the pod is deleted on exit (success or failure).
@@ -14,7 +16,8 @@
 set -euo pipefail
 
 BRANCH="${1:-claude/lilaw-poc-task-1-d7odN}"
-REPO="https://github.com/biswurmt/mlmd-noise.git"
+GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
+REPO="https://${GH_TOKEN}@github.com/biswurmt/mlmd-noise.git"
 GPU_ID="NVIDIA GeForce RTX 3090"
 TEMPLATE_ID="runpod-torch-v240"
 KEY_FILE="${HOME}/.ssh/id_ed25519_runpod"
@@ -40,7 +43,7 @@ POD_JSON=$(runpodctl pod create \
   --cloud-type COMMUNITY \
   --container-disk-in-gb 20 \
   --ssh \
-  -o json)
+  -o json 2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
 POD_ID=$(echo "${POD_JSON}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 echo "Pod created: ${POD_ID}"
 
@@ -68,7 +71,7 @@ sleep 15
 
 # ── 4. SSH connection details ─────────────────────────────────────────────────
 SSH_INFO=$(runpodctl ssh info "${POD_ID}" -o json)
-SSH_HOST=$(echo "${SSH_INFO}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['host'])")
+SSH_HOST=$(echo "${SSH_INFO}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['ip'])")
 SSH_PORT=$(echo "${SSH_INFO}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['port'])")
 echo "SSH: root@${SSH_HOST}:${SSH_PORT}"
 
