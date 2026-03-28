@@ -73,24 +73,32 @@ print(d.get('port', d.get('sshPort', '')))" 2>/dev/null || true)
 done
 [[ -n "${SSH_HOST}" && -n "${SSH_PORT}" ]] || { echo "ERROR: SSH never became ready"; runpodctl pod delete "${POD_ID}"; exit 1; }
 sleep 5
+
 SSH_CMD="ssh -i ${KEY_FILE} -o StrictHostKeyChecking=no -o ConnectTimeout=30 root@${SSH_HOST} -p ${SSH_PORT}"
 
 # ── Upload + launch detached ──────────────────────────────────────────────────
 echo "Launching smoke test (detached) ..."
 
-${SSH_CMD} bash -s << 'UPLOAD'
-cat > /workspace/run_smoke.sh << 'INNER'
+# Pass all variables via env to avoid placeholder collision issues
+${SSH_CMD} \
+  XBRANCH="${BRANCH}" \
+  XREPO="${REPO}" \
+  XRESULTS_BRANCH="${RESULTS_BRANCH}" \
+  XAPIKEY="${RUNPOD_API_KEY}" \
+  XPODID="${POD_ID}" \
+  bash -s << 'REMOTE'
+cat > /workspace/run_smoke.sh << SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
 exec > >(tee /workspace/smoke_output.txt) 2>&1
 
-echo "=== Smoke test started: $(date -u) ==="
-git clone --branch BRANCH_PH --single-branch REPO_PH /workspace/mlmd-noise
+echo "=== Smoke test started: \$(date -u) ==="
+git clone --branch ${XBRANCH} --single-branch ${XREPO} /workspace/mlmd-noise
 pip install -q scikit-learn pandas matplotlib
 pip install -q -e /workspace/mlmd-noise/lilaw-poc --no-deps
 
 cd /workspace/mlmd-noise
-git checkout -b RESULTS_BRANCH_PH
+git checkout -b ${XRESULTS_BRANCH}
 
 cd lilaw-poc
 mkdir -p results/smoke
@@ -103,28 +111,20 @@ echo "=== Pushing results ==="
 cd /workspace/mlmd-noise
 git config user.email 'runpod-sweep@noreply.github.com'
 git config user.name 'RunPod Sweep'
-git add lilaw-poc/results/smoke/
+git add -f lilaw-poc/results/smoke/
 git commit -m 'test: smoke test results from RunPod fire-and-forget'
-git push origin RESULTS_BRANCH_PH
+git push origin ${XRESULTS_BRANCH}
 
-echo "=== Stopping pod: $(date -u) ==="
-curl -s -X POST "https://api.runpod.io/graphql?api_key=APIKEY_PH" \
+echo "=== Stopping pod: \$(date -u) ==="
+curl -s -X POST "https://api.runpod.io/graphql?api_key=${XAPIKEY}" \
   -H "Content-Type: application/json" \
-  -d '{"query":"mutation { podStop(input: {podId: \"PODID_PH\"}) { id desiredStatus }}"}'
+  -d '{"query":"mutation { podStop(input: {podId: \"${XPODID}\"}) { id desiredStatus }}"}'
 echo "=== Done ==="
-INNER
+SCRIPT
 chmod +x /workspace/run_smoke.sh
-UPLOAD
-
-${SSH_CMD} bash -s << SUBST
-sed -i "s|BRANCH_PH|${BRANCH}|g" /workspace/run_smoke.sh
-sed -i "s|REPO_PH|${REPO}|g" /workspace/run_smoke.sh
-sed -i "s|RESULTS_BRANCH_PH|${RESULTS_BRANCH}|g" /workspace/run_smoke.sh
-sed -i "s|APIKEY_PH|${RUNPOD_API_KEY}|g" /workspace/run_smoke.sh
-sed -i "s|PODID_PH|${POD_ID}|g" /workspace/run_smoke.sh
 nohup bash /workspace/run_smoke.sh > /dev/null 2>&1 &
-echo "Launched (PID: \$!)"
-SUBST
+echo "Launched (PID: $!)"
+REMOTE
 
 echo ""
 echo "Pod: ${POD_ID}"

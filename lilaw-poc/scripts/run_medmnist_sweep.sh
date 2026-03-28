@@ -110,70 +110,61 @@ echo "SSH: root@${SSH_HOST}:${SSH_PORT}"
 SSH_CMD="ssh -i ${KEY_FILE} -o StrictHostKeyChecking=no -o ConnectTimeout=30 root@${SSH_HOST} -p ${SSH_PORT}"
 
 # ── 5. Launch detached experiment ─────────────────────────────────────────────
-# Upload a self-contained script, then run it via nohup.
-# The script: installs deps → runs sweep → git pushes results → stops pod.
-echo "Uploading and launching experiment (detached) ..."
+echo "Launching experiment (detached) ..."
 
-${SSH_CMD} bash -s << 'UPLOAD'
-cat > /workspace/run_experiment.sh << 'INNER_SCRIPT'
+${SSH_CMD} \
+  XBRANCH="${BRANCH}" \
+  XREPO="${REPO}" \
+  XAPIKEY="${RUNPOD_API_KEY}" \
+  XPODID="${POD_ID}" \
+  bash -s << 'REMOTE'
+cat > /workspace/run_experiment.sh << SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
 exec > >(tee /workspace/medmnist_sweep_output.txt) 2>&1
 
 echo "=============================="
 echo "MedMNIST sweep — fire-and-forget"
-echo "Started: $(date -u)"
+echo "Started: \$(date -u)"
 echo "=============================="
 
-# ── Install ──
 echo "=== Cloning repo ==="
-git clone --branch BRANCH_PLACEHOLDER --single-branch REPO_PLACEHOLDER /workspace/mlmd-noise
+git clone --branch ${XBRANCH} --single-branch ${XREPO} /workspace/mlmd-noise
 
 echo "=== Installing dependencies ==="
 pip install -q medmnist torchvision timm scikit-learn
 pip install -q -e /workspace/mlmd-noise/lilaw-poc --no-deps
 
-# ── Run experiment ──
 echo "=== Running MedMNIST sweep ==="
 cd /workspace/mlmd-noise/lilaw-poc
 mkdir -p results/medmnist
 python -m lilaw_poc.medmnist.experiment 2>&1
 
-echo "=== Sweep finished: $(date -u) ==="
+echo "=== Sweep finished: \$(date -u) ==="
 
-# ── Push results to git ──
 echo "=== Pushing results to git ==="
 cd /workspace/mlmd-noise
 git config user.email "runpod-sweep@noreply.github.com"
 git config user.name "RunPod Sweep"
-git add lilaw-poc/results/medmnist/results.json
+git add -f lilaw-poc/results/medmnist/results.json
 git commit -m "results(medmnist): add sweep results from RunPod
 
 Automated commit from RunPod H100 sweep pod."
-git push origin BRANCH_PLACEHOLDER
+git push origin ${XBRANCH}
 
-echo "=== Results pushed to BRANCH_PLACEHOLDER ==="
+echo "=== Results pushed to ${XBRANCH} ==="
 
-# ── Stop pod (stops billing, retains disk) ──
 echo "=== Stopping pod to save credits ==="
-curl -s -X POST "https://api.runpod.io/graphql?api_key=APIKEY_PLACEHOLDER" \
+curl -s -X POST "https://api.runpod.io/graphql?api_key=${XAPIKEY}" \
   -H "Content-Type: application/json" \
-  -d '{"query":"mutation { podStop(input: {podId: \"PODID_PLACEHOLDER\"}) { id desiredStatus }}"}'
+  -d '{"query":"mutation { podStop(input: {podId: \"${XPODID}\"}) { id desiredStatus }}"}'
 
 echo "=== Pod stop requested. Goodbye! ==="
-INNER_SCRIPT
+SCRIPT
 chmod +x /workspace/run_experiment.sh
-UPLOAD
-
-# Now substitute placeholders and launch
-${SSH_CMD} bash -s << SUBSTITUTE
-sed -i "s|BRANCH_PLACEHOLDER|${BRANCH}|g" /workspace/run_experiment.sh
-sed -i "s|REPO_PLACEHOLDER|${REPO}|g" /workspace/run_experiment.sh
-sed -i "s|APIKEY_PLACEHOLDER|${RUNPOD_API_KEY}|g" /workspace/run_experiment.sh
-sed -i "s|PODID_PLACEHOLDER|${POD_ID}|g" /workspace/run_experiment.sh
 nohup bash /workspace/run_experiment.sh > /dev/null 2>&1 &
-echo "Experiment launched in background (PID: \$!)"
-SUBSTITUTE
+echo "Experiment launched in background (PID: $!)"
+REMOTE
 
 echo ""
 echo "============================================"
