@@ -2,7 +2,10 @@
 ================
 Orchestrates the Diagnotix add-test pipeline:
   1. Snapshot the current graph node IDs (for diff computation).
-  2. Call Azure OpenAI to extract triage rules for the requested diagnostic test.
+  2. Call the configured LLM to extract triage rules for the requested diagnostic test.
+     Supported providers (set LLM_PROVIDER in .env):
+       - "nebius"  → Nebius AI Studio (OpenAI-compatible, API key auth)
+       - "azure"   → Azure OpenAI     (AzureCliCredential, requires az login)
   3. Validate and append the new rules to guideline_rules.json.
   4. Invoke generate_knowledge_graph() from build_kg.py to rebuild the PKL.
   5. Compute the diff (new nodes / new edges) against the pre-rebuild snapshot.
@@ -15,9 +18,6 @@ import json
 import os
 import re
 import sys
-
-from azure.identity import AzureCliCredential, get_bearer_token_provider
-from openai import AzureOpenAI
 
 from backend.models.schemas import AddTestResponse
 from backend.services.graph_service import get_existing_node_ids, load_graph_json
@@ -37,37 +37,61 @@ from audit_guidelines import _normalise_rule, run_grounded_verify_pass  # noqa: 
 _RULES_FILE = os.path.join(_KG_DIR, "guideline_rules.json")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Azure OpenAI client — uses AzureCliCredential (no API key required).
-# Set ENDPOINT_URL and DEPLOYMENT_NAME in knowledge-graphs/.env.
+# LLM client — controlled by LLM_PROVIDER env var ("azure" or "nebius").
+#
+# Nebius:  set LLM_PROVIDER=nebius, NEBIUS_API_KEY, and optionally NEBIUS_MODEL.
+#          Uses the standard openai.OpenAI client against Nebius AI Studio's
+#          OpenAI-compatible endpoint.
+#
+# Azure:   set LLM_PROVIDER=azure (default), ENDPOINT_URL, DEPLOYMENT_NAME.
+#          Uses AzureOpenAI with AzureCliCredential (requires az login).
+#
 # Optionally set BING_SEARCH_KEY to enable live web search grounding for
-# guidelines that fall outside the four encoded in the system (AHA/ACC, CTAS,
-# ACR, NICE).  Without this key the LLM falls back to its training knowledge.
+# guidelines outside the four encoded sources.  Without it the LLM falls back
+# to training knowledge.
 # ─────────────────────────────────────────────────────────────────────────────
-_endpoint = os.environ.get("ENDPOINT_URL")
-_deployment = os.environ.get("DEPLOYMENT_NAME")
 _bing_key = os.environ.get("BING_SEARCH_KEY")
+_provider = os.environ.get("LLM_PROVIDER", "azure").lower()
 
-if not _endpoint:
-    raise ValueError(
-        "ENDPOINT_URL not found in the environment. "
-        "Add it to knowledge-graphs/.env and restart the server."
+if _provider == "nebius":
+    from openai import OpenAI as _OpenAI
+    _nebius_key = os.environ.get("NEBIUS_API_KEY")
+    if not _nebius_key:
+        raise ValueError(
+            "NEBIUS_API_KEY not set — required when LLM_PROVIDER=nebius. "
+            "Add it to knowledge-graphs/.env and restart the server."
+        )
+    _deployment = os.environ.get(
+        "NEBIUS_MODEL", "meta-llama/Meta-Llama-3.1-70B-Instruct-fast"
     )
-if not _deployment:
-    raise ValueError(
-        "DEPLOYMENT_NAME not found in the environment. "
-        "Add it to knowledge-graphs/.env and restart the server."
+    _CLIENT = _OpenAI(
+        base_url="https://api.studio.nebius.ai/v1/",
+        api_key=_nebius_key,
     )
-
-_credential = AzureCliCredential()
-_token_provider = get_bearer_token_provider(
-    _credential, "https://cognitiveservices.azure.com/.default"
-)
-
-_CLIENT = AzureOpenAI(
-    azure_endpoint=_endpoint,
-    azure_ad_token_provider=_token_provider,
-    api_version="2025-01-01-preview",
-)
+else:  # azure (default)
+    from azure.identity import AzureCliCredential, get_bearer_token_provider
+    from openai import AzureOpenAI
+    _endpoint = os.environ.get("ENDPOINT_URL")
+    _deployment = os.environ.get("DEPLOYMENT_NAME")
+    if not _endpoint:
+        raise ValueError(
+            "ENDPOINT_URL not set — required when LLM_PROVIDER=azure. "
+            "Add it to knowledge-graphs/.env and restart the server."
+        )
+    if not _deployment:
+        raise ValueError(
+            "DEPLOYMENT_NAME not set — required when LLM_PROVIDER=azure. "
+            "Add it to knowledge-graphs/.env and restart the server."
+        )
+    _credential = AzureCliCredential()
+    _token_provider = get_bearer_token_provider(
+        _credential, "https://cognitiveservices.azure.com/.default"
+    )
+    _CLIENT = AzureOpenAI(
+        azure_endpoint=_endpoint,
+        azure_ad_token_provider=_token_provider,
+        api_version="2025-01-01-preview",
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -83,6 +107,11 @@ VALID_NODE_TYPES = {
 
 # Recognised authoritative guideline bodies — rules citing anything outside
 # this set are rejected at the schema-validation stage before the LLM review.
+# Detects LLM-generated condition names with a spurious short prefix that duplicates
+# the start of the next word (e.g. "Ac Acute Myocardial Infarction", "St Stroke").
+# Pattern: standalone word of 1–3 chars followed by a word beginning with those chars.
+_GARBLED_COND_RE = re.compile(r"^(\w{1,3})\s+\1", re.IGNORECASE)
+
 VALID_SOURCES = {
     "AHA/ACC", "CTAS", "ACR", "NICE", "ESC", "ACEP", "WHO", "IDSA", "GOLD",
     "ACOG", "NCCN", "Endocrine Society", "ASA", "AASLD", "ADA", "ATS", "ERS",
@@ -274,6 +303,9 @@ def _regenerate_targeted(
                 rule["node_type"] = "Symptom"
             if rule["source"] not in VALID_SOURCES:
                 continue
+            if _GARBLED_COND_RE.match(rule.get("condition", "")):
+                print(f"  [regen] Dropped garbled condition: '{rule['condition']}'")
+                continue
             rule["test"] = diagnostic_test
             valid.append(rule)
 
@@ -334,15 +366,21 @@ def _verify_and_converge(
 
         # Step 3: Targeted regeneration for dropped pairs (if iterations remain)
         if iteration < max_iterations:
-            survived_keys = {
+            norm_survived_keys = {
                 (r["condition"].strip().lower(), r["node_type"].strip().lower())
                 for r in survived
             }
+            # Normalise current_rules so condition strings match what run_grounded_verify_pass
+            # returned in `survived` — without this, survived rules whose condition was
+            # normalised (e.g. "Ectopic Pregnancy" → canonical ICD-10 name) won't be found
+            # in norm_survived_keys, causing them to appear as "dropped" and be re-generated
+            # unnecessarily.  _normalise_rule uses module-level caches so no extra API calls.
+            norm_current = [_normalise_rule(r)[0] for r in current_rules]
             dropped_pairs = [
                 {"condition": r["condition"], "node_type": r["node_type"]}
-                for r in current_rules
+                for r in norm_current
                 if (r["condition"].strip().lower(), r["node_type"].strip().lower())
-                not in survived_keys
+                not in norm_survived_keys
             ]
             replacements = _regenerate_targeted(dropped_pairs, diagnostic_test)
             current_rules = survived + replacements

@@ -43,10 +43,8 @@ import sys
 import time
 
 import requests
-from azure.identity import AzureCliCredential, get_bearer_token_provider
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from openai import AzureOpenAI
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Environment
@@ -57,21 +55,38 @@ load_dotenv(os.path.join(_THIS_DIR, ".env"))
 
 UMLS_API_KEY = os.getenv("UMLS_API_KEY")
 
-_endpoint   = os.environ.get("ENDPOINT_URL")
-_deployment = os.environ.get("DEPLOYMENT_NAME")
+_provider = os.environ.get("LLM_PROVIDER", "azure").lower()
 
-if not _endpoint or not _deployment:
-    raise ValueError("ENDPOINT_URL / DEPLOYMENT_NAME missing from knowledge-graphs/.env")
-
-_credential     = AzureCliCredential()
-_token_provider = get_bearer_token_provider(
-    _credential, "https://cognitiveservices.azure.com/.default"
-)
-_CLIENT = AzureOpenAI(
-    azure_endpoint=_endpoint,
-    azure_ad_token_provider=_token_provider,
-    api_version="2025-01-01-preview",
-)
+if _provider == "nebius":
+    from openai import OpenAI as _OpenAI
+    _nebius_key = os.environ.get("NEBIUS_API_KEY")
+    if not _nebius_key:
+        raise ValueError(
+            "NEBIUS_API_KEY not set — required when LLM_PROVIDER=nebius."
+        )
+    _deployment = os.environ.get(
+        "NEBIUS_MODEL", "meta-llama/Meta-Llama-3.1-70B-Instruct-fast"
+    )
+    _CLIENT = _OpenAI(
+        base_url="https://api.studio.nebius.ai/v1/",
+        api_key=_nebius_key,
+    )
+else:  # azure (default)
+    from azure.identity import AzureCliCredential, get_bearer_token_provider
+    from openai import AzureOpenAI
+    _endpoint   = os.environ.get("ENDPOINT_URL")
+    _deployment = os.environ.get("DEPLOYMENT_NAME")
+    if not _endpoint or not _deployment:
+        raise ValueError("ENDPOINT_URL / DEPLOYMENT_NAME missing from knowledge-graphs/.env")
+    _credential     = AzureCliCredential()
+    _token_provider = get_bearer_token_provider(
+        _credential, "https://cognitiveservices.azure.com/.default"
+    )
+    _CLIENT = AzureOpenAI(
+        azure_endpoint=_endpoint,
+        azure_ad_token_provider=_token_provider,
+        api_version="2025-01-01-preview",
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Verification (same prompt as kg_service.py)
