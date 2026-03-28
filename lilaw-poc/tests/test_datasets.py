@@ -1,7 +1,7 @@
+import pytest
 import torch
 
 from lilaw_poc.data.datasets import DATASET_NAMES, load_dataset
-import pytest
 
 
 class TestLoadDataset:
