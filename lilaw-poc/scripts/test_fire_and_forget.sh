@@ -51,12 +51,28 @@ for _ in $(seq 1 60); do
   sleep 10
 done
 [[ "${STATUS}" == "RUNNING" ]] || { echo "ERROR: pod never started"; runpodctl pod delete "${POD_ID}"; exit 1; }
-sleep 15
 
-# ── SSH info ──────────────────────────────────────────────────────────────────
-SSH_INFO=$(runpodctl ssh info "${POD_ID}" -o json)
-SSH_HOST=$(echo "${SSH_INFO}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['ip'])")
-SSH_PORT=$(echo "${SSH_INFO}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['port'])")
+# ── Wait for SSH to become ready ─────────────────────────────────────────────
+echo "Waiting for SSH ..."
+SSH_HOST=""
+SSH_PORT=""
+for _ in $(seq 1 30); do
+  SSH_INFO=$(runpodctl ssh info "${POD_ID}" -o json 2>/dev/null || echo '{}')
+  SSH_HOST=$(echo "${SSH_INFO}" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(d.get('ip', d.get('host', d.get('publicIp', ''))))" 2>/dev/null || true)
+  SSH_PORT=$(echo "${SSH_INFO}" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(d.get('port', d.get('sshPort', '')))" 2>/dev/null || true)
+  if [[ -n "${SSH_HOST}" && -n "${SSH_PORT}" ]]; then
+    echo "  SSH ready: ${SSH_HOST}:${SSH_PORT}"
+    break
+  fi
+  echo "  SSH not ready yet ..."
+  sleep 10
+done
+[[ -n "${SSH_HOST}" && -n "${SSH_PORT}" ]] || { echo "ERROR: SSH never became ready"; runpodctl pod delete "${POD_ID}"; exit 1; }
+sleep 5
 SSH_CMD="ssh -i ${KEY_FILE} -o StrictHostKeyChecking=no -o ConnectTimeout=30 root@${SSH_HOST} -p ${SSH_PORT}"
 
 # ── Upload + launch detached ──────────────────────────────────────────────────
