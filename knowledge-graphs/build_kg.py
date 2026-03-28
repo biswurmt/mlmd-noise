@@ -1,4 +1,6 @@
 import json
+import re
+import sys
 import time
 import requests
 import pandas as pd
@@ -161,6 +163,10 @@ def get_infoway_icd10ca_concept(term, access_token):
     Reuses the same ValueSet/$expand endpoint as SNOMED CT CA with a
     different ValueSet URL targeting the ICD-10-CA code system (CIHI).
     Returns (display_name, code) or (term, None) on failure.
+
+    Returns the sentinel (None, "404") when the ValueSet itself is not found
+    so the caller can detect a globally unavailable ValueSet and skip all
+    remaining lookups rather than printing a 404 error for every condition.
     """
     base_uri = "https://terminologystandardsservice.ca/fhir/ValueSet/$expand"
     headers = {
@@ -174,6 +180,8 @@ def get_infoway_icd10ca_concept(term, access_token):
     }
     try:
         response = requests.get(base_uri, headers=headers, params=params)
+        if response.status_code == 404:
+            return None, "404"
         response.raise_for_status()
         contains = response.json().get("expansion", {}).get("contains", [])
         if contains:
@@ -241,28 +249,71 @@ def get_open_medical_concept(term):
 #         print(f"  UMLS ({sabs}) error for '{term}': {e}")
 #         return term, None
 
+def _strip_search_qualifiers(term: str) -> str:
+    """Strip clinical context qualifiers and ICD-10 boilerplate from a condition
+    name to improve UMLS search hit rate when the full name fails to match.
+
+    Handles patterns such as:
+      "Acute Appendicitis in Pediatric Patients"  → "Acute Appendicitis"
+      "Suspected Acute Appendicitis in Pregnancy" → "Acute Appendicitis"
+      "Ovarian Torsion (Pediatric/Adolescent)"    → "Ovarian Torsion"
+      "Acute appendicitis NOS (disorder)"         → "Acute appendicitis"
+
+    Clinical meaning-bearing words (e.g. "Ruptured", "Acute") are NOT removed.
+    """
+    s = term
+    # Remove leading "Suspected" / "Possible" — not part of the diagnosis code
+    s = re.sub(r"^\s*(Suspected|Possible)\s+", "", s, flags=re.IGNORECASE)
+    # Remove trailing " in <context phrase>" (e.g. "in Pediatric Patients", "in Pregnancy")
+    s = re.sub(r"\s+in\s+\w[\w\s]*$", "", s, flags=re.IGNORECASE)
+    # Remove parenthetical qualifiers (e.g. "(Pediatric/Adolescent)", "(disorder)")
+    s = re.sub(r"\s*\([^)]+\)", "", s)
+    # Remove ICD-10 administrative boilerplate
+    s = re.sub(
+        r"\b(unspecified|NOS|sequela|not elsewhere classified|without mention of)\b",
+        "", s, flags=re.IGNORECASE,
+    )
+    # Collapse extra whitespace / trailing punctuation
+    s = re.sub(r"[\s,;]+", " ", s).strip().strip(",").strip()
+    return s if s else term  # fallback to original if everything was stripped
+
+
 def get_umls_concept(term, sabs, api_key):
     """
-    A 2-step UMLS lookup that completely isolates the text search from 
+    A 2-step UMLS lookup that completely isolates the text search from
     the vocabulary filter to avoid NLM 500 Server Errors.
     """
     search_url = "https://uts-ws.nlm.nih.gov/rest/search/current"
-    
-    # STEP 1: Get the CUI using a specific search type
-    search_params = {
-        "string": term,
-        "searchType": "normalizedString",
-        "apiKey": api_key
-    }
-    
+
+    def _cui_search(string: str) -> list:
+        """Run a UMLS words search and return the results list."""
+        resp = requests.get(
+            search_url,
+            params={"string": string, "searchType": "words", "apiKey": api_key},
+        )
+        resp.raise_for_status()
+        return resp.json().get("result", {}).get("results", [])
+
     try:
-        search_resp = requests.get(search_url, params=search_params)
-        search_resp.raise_for_status()
-        search_results = search_resp.json().get("result", {}).get("results", [])
-        
+        # STEP 1: Get the CUI.
+        # "words" requires every query token to appear in the concept name (AND
+        # logic) — tolerates different word order without needing an exact
+        # post-normalization match, so "Acute Myocardial Infarction" reliably
+        # finds I21 even without token-sorted exact matching.
+        search_results = _cui_search(term)
+
+        # Fallback: strip context qualifiers ("in Pediatric Patients", "Suspected",
+        # parentheticals) and retry so that e.g. "Acute Appendicitis in Pediatric
+        # Patients" falls through to "Acute Appendicitis".
+        if not search_results:
+            stripped = _strip_search_qualifiers(term)
+            if stripped != term.strip():
+                print(f"  [umls fallback] '{term}' → searching as '{stripped}'")
+                search_results = _cui_search(stripped)
+
         if not search_results:
             return term, None
-            
+
         cui = search_results[0]["ui"]
         best_name = search_results[0]["name"]
         
@@ -294,7 +345,11 @@ def get_umls_concept(term, sabs, api_key):
             # "code" is the source vocabulary code (e.g. "I21.9" for ICD-10-CM,
             # "11524-6" for LOINC). "ui" is the UMLS-internal AUI and must NOT
             # be used here — it looks like "A17786738" and is not a real code.
+            # For some vocabularies (e.g. WHO ICD-10) the UMLS API returns code
+            # as a full URL like ".../source/ICD10/I21" — strip to the last segment.
             source_code = atoms_results[0].get("code") or atoms_results[0].get("ui")
+            if source_code and source_code.startswith("http"):
+                source_code = source_code.rstrip("/").split("/")[-1]
             return best_name, source_code
             
         return best_name, None
@@ -669,8 +724,21 @@ def generate_knowledge_graph():
     print("Looking up ICD-10-CA codes via Canada Health Infoway...")
     icd10ca_map = {}
     if infoway_token:
+        icd10ca_available = True
         for condition_name in df_rules["condition"].unique():
-            _, code = get_infoway_icd10ca_concept(condition_name, infoway_token)
+            if not icd10ca_available:
+                icd10ca_map[condition_name] = None
+                continue
+            display, code = get_infoway_icd10ca_concept(condition_name, infoway_token)
+            if code == "404":
+                icd10ca_available = False
+                print(
+                    "  WARNING: Infoway ICD-10-CA ValueSet returned 404 — "
+                    "the ValueSet URL may be incorrect or the service is unavailable. "
+                    "Skipping all remaining ICD-10-CA lookups."
+                )
+                icd10ca_map[condition_name] = None
+                continue
             icd10ca_map[condition_name] = code
             print(f"  {condition_name} → {code if code else 'not found'}")
     else:
@@ -764,6 +832,24 @@ def generate_knowledge_graph():
     print(f"\nKnowledge graph saved to '{pkl_path}'")
     print(f"  Nodes : {kg.number_of_nodes()}")
     print(f"  Edges : {kg.number_of_edges()}")
+
+    # ── Optional: upload artifacts to Nebius S3 ────────────────────────────
+    if os.environ.get("S3_BUCKET"):
+        from s3_service import upload_build_artifacts
+        upload_build_artifacts(pkl_path, _data_file)
+
+    # ── Optional: sync to Neo4j ────────────────────────────────────────────
+    if (
+        os.environ.get("NEO4J_URI")
+        and os.environ.get("USE_NEO4J", "false").lower() == "true"
+    ):
+        _backend_services = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "diagnotix", "backend", "services")
+        )
+        if _backend_services not in sys.path:
+            sys.path.insert(0, _backend_services)
+        from neo4j_service import sync_graph_to_neo4j
+        sync_graph_to_neo4j(kg)
 
     return {
         "nodes":    kg.number_of_nodes(),
