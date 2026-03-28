@@ -1,0 +1,77 @@
+version: "3.9"
+
+services:
+
+  # ── Neo4j graph database ────────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: diagnotix-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: "${NEO4J_USER}/${NEO4J_PASSWORD}"
+      NEO4J_server_default__listen__address: "0.0.0.0"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    ports:
+      - "127.0.0.1:7474:7474"   # Browser — bound to localhost only
+      - "127.0.0.1:7687:7687"   # Bolt    — bound to localhost only
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7474"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── FastAPI backend ─────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: diagnotix/backend/Dockerfile
+    container_name: diagnotix-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      USE_NEO4J: "true"
+      # Explicit overrides ensure these reach the process even if env_file
+      # parsing has issues with special characters in values.
+      LLM_PROVIDER: "${LLM_PROVIDER:-nebius}"
+      NEBIUS_API_KEY: "${NEBIUS_API_KEY}"
+      NEBIUS_MODEL: "${NEBIUS_MODEL:-meta-llama/Meta-Llama-3.1-70B-Instruct-fast}"
+      NEO4J_URI: "${NEO4J_URI:-bolt://neo4j:7687}"
+      NEO4J_USER: "${NEO4J_USER:-neo4j}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      # Persist PKL + rules between restarts; S3 is the durable store and
+      # the cold-start recovery path — this volume avoids re-downloading
+      # on every container restart.
+      - kg_data:/app/knowledge-graphs
+
+  # ── React frontend (served by Nginx) ────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: diagnotix/frontend/Dockerfile
+    container_name: diagnotix-frontend
+    restart: unless-stopped
+
+  # ── Public-facing reverse proxy ─────────────────────────────────────────
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: diagnotix-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  kg_data:
