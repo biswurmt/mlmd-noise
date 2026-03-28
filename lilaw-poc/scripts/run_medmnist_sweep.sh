@@ -120,8 +120,19 @@ ${SSH_CMD} \
   bash -s << 'REMOTE'
 cat > /workspace/run_experiment.sh << SCRIPT
 #!/usr/bin/env bash
-set -euo pipefail
 exec > >(tee /workspace/medmnist_sweep_output.txt) 2>&1
+
+# Always stop pod on exit (success or failure) to avoid burning credits
+stop_pod() {
+  echo "=== Stopping pod to save credits: \$(date -u) ==="
+  curl -s -X POST "https://api.runpod.io/graphql?api_key=${XAPIKEY}" \
+    -H "Content-Type: application/json" \
+    -d '{"query":"mutation { podStop(input: {podId: \"${XPODID}\"}) { id desiredStatus }}"}'
+  echo "=== Pod stop requested ==="
+}
+trap stop_pod EXIT
+
+set -euo pipefail
 
 echo "=============================="
 echo "MedMNIST sweep — fire-and-forget"
@@ -152,14 +163,7 @@ git commit -m "results(medmnist): add sweep results from RunPod
 Automated commit from RunPod H100 sweep pod."
 git push origin ${XBRANCH}
 
-echo "=== Results pushed to ${XBRANCH} ==="
-
-echo "=== Stopping pod to save credits ==="
-curl -s -X POST "https://api.runpod.io/graphql?api_key=${XAPIKEY}" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"mutation { podStop(input: {podId: \"${XPODID}\"}) { id desiredStatus }}"}'
-
-echo "=== Pod stop requested. Goodbye! ==="
+echo "=== Results pushed to ${XBRANCH}: \$(date -u) ==="
 SCRIPT
 chmod +x /workspace/run_experiment.sh
 nohup bash /workspace/run_experiment.sh > /dev/null 2>&1 &
