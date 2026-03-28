@@ -80,3 +80,29 @@ export function addTest(diagnosticTest: string): Promise<AddTestResponse> {
     body: JSON.stringify({ diagnostic_test: diagnosticTest }),
   });
 }
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatContext {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  pathway: string | null;
+}
+
+/** Send a chat message with conversation history and the current KG context. */
+export function sendChatMessage(
+  message: string,
+  history: ChatMessage[],
+  context: ChatContext,
+): Promise<{ content: string }> {
+  return apiFetch<{ content: string }>("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history, context }),
+  });
+}

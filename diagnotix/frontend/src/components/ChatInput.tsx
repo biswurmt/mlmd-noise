@@ -3,10 +3,7 @@ import { type FormEvent, useState } from "react";
 const EXAMPLES = [
   "CT Head",
   "Chest X-Ray",
-  "D-Dimer",
   "Troponin",
-  "Lumbar Puncture",
-  "Urinalysis",
 ];
 
 interface Props {

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import ChatBot from "./components/ChatBot";
 import ChatInput from "./components/ChatInput";
 import GraphCanvas from "./components/GraphCanvas";
 import { DEFAULT_NODE_COLOR, NODE_COLORS } from "./constants/nodeColors";
-import { addTest, getGraph, getTests, type GraphEdge, type GraphNode, type TestNode } from "./services/api";
+import { addTest, getGraph, getTests, type ChatContext, type GraphEdge, type GraphNode, type TestNode } from "./services/api";
 
 const DEFAULT_PATHWAY = "Abdominal Ultrasound";
 
@@ -26,6 +27,9 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [chatMode, setChatMode] = useState(false);
+  const [chatContext, setChatContext] = useState<ChatContext | null>(null);
+  const [chatHoveredNodeId, setChatHoveredNodeId] = useState<string | null>(null);
 
   // ── Load sidebar test list on mount ───────────────────────────────────────
   useEffect(() => {
@@ -184,100 +188,130 @@ export default function App() {
         {/* Sidebar */}
         <aside className="sidebar">
 
-          {/* ── Node search ── */}
-          <p className="sidebar-title">Search</p>
-          <div className="search-section">
-            <input
-              className="node-search-input"
-              type="text"
-              placeholder="Search nodes…"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setFocusedNodeId(null);
+          {/* ── Mode toggle ── */}
+          <div className="sidebar-mode-toggle">
+            <button
+              className={`mode-btn${!chatMode ? " active" : ""}`}
+              onClick={() => { setChatMode(false); setChatHoveredNodeId(null); }}
+            >
+              Graph
+            </button>
+            <button
+              className={`mode-btn${chatMode ? " active" : ""}`}
+              onClick={() => {
+                setChatContext({
+                  nodes: focusedNodes ?? visibleNodes,
+                  edges: focusedEdges ?? visibleEdges,
+                  pathway: selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : null,
+                });
+                setChatMode(true);
               }}
+            >
+              Chat
+            </button>
+          </div>
+
+          {chatMode && chatContext ? (
+            <ChatBot
+              context={chatContext}
+              onHoverNode={setChatHoveredNodeId}
             />
-            {searchQuery.trim() ? (
-              <div className="search-results">
-                {searchResults.length === 0 ? (
-                  <p className="search-no-results">No nodes found</p>
-                ) : (
-                  searchResults.map((n) => {
-                    const label = n.id.replace(/^[^:]+:\s*/, "");
-                    const color = NODE_COLORS[n.node_type ?? ""] ?? DEFAULT_NODE_COLOR;
-                    return (
-                      <button
-                        key={n.id}
-                        className={`search-result-btn${focusedNodeId === n.id ? " active" : ""}`}
-                        onClick={() => setFocusedNodeId(focusedNodeId === n.id ? null : n.id)}
-                      >
-                        <span className="search-result-dot" style={{ background: color }} />
-                        {label}
-                      </button>
-                    );
-                  })
+          ) : (
+            <>
+              {/* ── Node search ── */}
+              <p className="sidebar-title">Search</p>
+              <div className="search-section">
+                <input
+                  className="node-search-input"
+                  type="text"
+                  placeholder="Search nodes…"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setFocusedNodeId(null);
+                  }}
+                />
+                {searchQuery.trim() && (
+                  <div className="search-results">
+                    {searchResults.length === 0 ? (
+                      <p className="search-no-results">No nodes found</p>
+                    ) : (
+                      searchResults.map((n) => {
+                        const label = n.id.replace(/^[^:]+:\s*/, "");
+                        const color = NODE_COLORS[n.node_type ?? ""] ?? DEFAULT_NODE_COLOR;
+                        return (
+                          <button
+                            key={n.id}
+                            className={`search-result-btn${focusedNodeId === n.id ? " active" : ""}`}
+                            onClick={() => setFocusedNodeId(focusedNodeId === n.id ? null : n.id)}
+                          >
+                            <span className="search-result-dot" style={{ background: color }} />
+                            {label}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 )}
               </div>
-            ) : (
-              <p className="search-hint">Type to search nodes by name</p>
-            )}
-          </div>
-          <div className="sidebar-divider" />
-
-          {/* ── Pathway picker ── */}
-          {allTestNodes.length > 0 && (
-            <>
-              <p className="sidebar-title">Pathways</p>
-              <div className="pathway-list">
-                <button
-                  className={`pathway-btn${selectedTest === null ? " active" : ""}`}
-                  onClick={() => setSelectedTest(null)}
-                >
-                  All Pathways
-                  <span className="pathway-count">{allTestNodes.length}</span>
-                </button>
-                {allTestNodes.map(({ id, label }) => (
-                  <button
-                    key={id}
-                    className={`pathway-btn${selectedTest === id ? " active" : ""}`}
-                    onClick={() => setSelectedTest(selectedTest === id ? null : id)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
               <div className="sidebar-divider" />
+
+              {/* ── Node type legend ── */}
+              <p className="sidebar-title">Node Types</p>
+              <ul className="legend">
+                {Object.entries(NODE_COLORS).map(([type, color]) => {
+                  const hidden = hiddenTypes.has(type);
+                  return (
+                    <li
+                      key={type}
+                      className={`legend-item${hidden ? " legend-item--hidden" : ""}`}
+                      onClick={() => toggleType(type)}
+                      title={hidden ? `Show ${type.replace(/_/g, " ")}` : `Hide ${type.replace(/_/g, " ")}`}
+                    >
+                      <span
+                        className="legend-dot"
+                        style={{ background: hidden ? "var(--border)" : color }}
+                      />
+                      <span className="legend-label">{type.replace(/_/g, " ")}</span>
+                      <span className="legend-count">{typeCounts[type] ?? 0}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {/* ── Pathway picker ── */}
+              {allTestNodes.length > 0 && (
+                <>
+                  <div className="sidebar-divider" />
+                  <p className="sidebar-title">Pathways</p>
+                  <div className="pathway-list">
+                    <button
+                      className={`pathway-btn${selectedTest === null ? " active" : ""}`}
+                      onClick={() => setSelectedTest(null)}
+                    >
+                      All Pathways
+                      <span className="pathway-count">{allTestNodes.length}</span>
+                    </button>
+                    {allTestNodes.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        className={`pathway-btn${selectedTest === id ? " active" : ""}`}
+                        onClick={() => setSelectedTest(selectedTest === id ? null : id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="sidebar-divider" />
+
+              {/* ── Add pathway ── */}
+              <p className="sidebar-title">Add Pathway</p>
+              <ChatInput onSubmit={handleAddTest} disabled={loading} />
             </>
           )}
-
-          {/* ── Node type legend ── */}
-          <p className="sidebar-title">Node Types</p>
-          <ul className="legend">
-            {Object.entries(NODE_COLORS).map(([type, color]) => {
-              const hidden = hiddenTypes.has(type);
-              return (
-                <li
-                  key={type}
-                  className={`legend-item${hidden ? " legend-item--hidden" : ""}`}
-                  onClick={() => toggleType(type)}
-                  title={hidden ? `Show ${type.replace(/_/g, " ")}` : `Hide ${type.replace(/_/g, " ")}`}
-                >
-                  <span
-                    className="legend-dot"
-                    style={{ background: hidden ? "var(--border)" : color }}
-                  />
-                  <span className="legend-label">{type.replace(/_/g, " ")}</span>
-                  <span className="legend-count">{typeCounts[type] ?? 0}</span>
-                </li>
-              );
-            })}
-          </ul>
-
-          <div className="sidebar-divider" />
-
-          {/* ── Add pathway ── */}
-          <p className="sidebar-title">Add Pathway</p>
-          <ChatInput onSubmit={handleAddTest} disabled={loading} />
         </aside>
 
         {/* Graph canvas */}
@@ -296,6 +330,7 @@ export default function App() {
                   edges={focusedEdges ?? visibleEdges}
                   newNodeIds={newNodeIds}
                   activePathway={selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : null}
+                  highlightedNodeId={chatHoveredNodeId}
                 />
               )}
               {graphLoading && (
