@@ -82,6 +82,38 @@ _NODE_PREFIX = {
     "Mechanism_of_Injury":  "MOI",
 }
 
+# Authoritative LOINC codes for each diagnostic test.
+# These override whatever UMLS returns, which sometimes yields non-panel
+# codes (MTHU internal IDs, LP part codes, LA answer codes) that are not
+# valid LOINC study/panel identifiers.
+_LOINC_OVERRIDES: dict[str, str] = {
+    "ECG":                  "11524-6",   # EKG study (12-lead)
+    "Testicular Ultrasound":"24636-1",   # US Scrotum
+    "Arm X-Ray":            "24630-4",   # XR Upper extremity
+    "Appendix Ultrasound":  "30688-3",   # US Appendix
+    "Abdominal Ultrasound": "24640-3",   # US Abdomen and retroperitoneum
+    "CT Head":              "24725-4",   # CT Head
+}
+
+# Authoritative ICD-10 (WHO) codes for conditions where the UMLS lookup
+# returns nothing — typically because the condition name is a clinical
+# colloquialism rather than a standard UMLS preferred term.
+_ICD10_OVERRIDES: dict[str, str] = {
+    "Testicular Torsion":           "N44.0",
+    "Potential Cardiac Ischemia":   "I25.9",
+    "Suspected Epididymo-orchitis": "N45.3",
+    "Acute Stroke":                 "I63.9",
+    "Bradycardia":                  "R00.1",
+    "Hypertensive Emergency":       "I16.1",
+    "Epididymitis":                 "N45.1",
+    "Arm Fracture":                 "S42.3",
+    "Wrist Fracture":               "S62.10",
+    "Shoulder Fracture":            "S42.9",
+    "Abdominal Aortic Aneurysm":    "I71.3",
+    "Ectopic Pregnancy":            "O00.9",
+    "Ovarian Torsion":              "N83.53",
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # API Helper Functions
@@ -292,9 +324,14 @@ def get_umls_concept(term, sabs, api_key):
         
         if atoms_results:
             # "code" is the source vocabulary code (e.g. "I21.9" for ICD-10-CM,
-            # "11524-6" for LOINC). "ui" is the UMLS-internal AUI and must NOT
-            # be used here — it looks like "A17786738" and is not a real code.
-            source_code = atoms_results[0].get("code") or atoms_results[0].get("ui")
+            # "11524-6" for LOINC). In recent UMLS API versions "code" is a full
+            # URL like "https://uts-ws.nlm.nih.gov/rest/content/.../source/ICD10/I21"
+            # — extract the last path segment to get the plain code string.
+            raw_code = atoms_results[0].get("code") or atoms_results[0].get("ui")
+            if raw_code and str(raw_code).startswith("http"):
+                source_code = str(raw_code).rstrip("/").split("/")[-1]
+            else:
+                source_code = raw_code
             return best_name, source_code
             
         return best_name, None
@@ -641,21 +678,41 @@ def generate_knowledge_graph():
     else:
         print("  WARNING: Infoway token unavailable — Canadian SNOMED CT codes will be omitted.")
 
-    # 4. LOINC codes via UMLS — one lookup per unique test name to avoid redundant calls
-    if UMLS_API_KEY:
-        print("Looking up LOINC codes via UMLS...")
-        loinc_map = {}
-        for test_name in df_rules["test"].unique():
-            _, code = get_umls_concept(test_name, "LNC", UMLS_API_KEY)
-            loinc_map[test_name] = code
-        df_rules["loinc_code"] = df_rules["test"].map(loinc_map)
-    else:
-        print("  WARNING: UMLS API key unavailable — LOINC codes will be omitted.")
-        df_rules["loinc_code"] = None
+    # 4. LOINC codes — start with authoritative overrides, then fill remaining
+    #    tests via UMLS.  UMLS sometimes returns non-panel codes (MTHU internal
+    #    IDs, LP part codes, LA answer codes); we validate and reject those.
+    import re as _re
+    _LOINC_PANEL_RE = _re.compile(r"^\d{1,5}-\d$")   # e.g. "11524-6"
 
-    # 5. ICD-10 codes — WHO international via UMLS source "ICD10" (requires key).
+    loinc_map: dict[str, str | None] = dict(_LOINC_OVERRIDES)  # seed with overrides
+
+    if UMLS_API_KEY:
+        print("Looking up LOINC codes via UMLS (overrides applied after)...")
+        for test_name in df_rules["test"].unique():
+            if test_name in loinc_map:
+                print(f"  {test_name} → {loinc_map[test_name]} (override)")
+                continue
+            _, code = get_umls_concept(test_name, "LNC", UMLS_API_KEY)
+            if code and _LOINC_PANEL_RE.match(str(code)):
+                loinc_map[test_name] = code
+                print(f"  {test_name} → {code}")
+            elif code:
+                print(f"  {test_name} → UMLS returned '{code}' (non-panel, rejected)")
+                loinc_map[test_name] = None
+            else:
+                loinc_map[test_name] = None
+    else:
+        print("  UMLS API key unavailable — using LOINC override table only.")
+        for test_name in df_rules["test"].unique():
+            if test_name not in loinc_map:
+                loinc_map[test_name] = None
+
+    df_rules["loinc_code"] = df_rules["test"].map(loinc_map)
+
+    # 5. ICD-10 codes — WHO international via UMLS, with manual overrides for
+    #    conditions where UMLS lookup returns nothing (clinical colloquialisms).
     print("Looking up ICD-10 (WHO international) codes via UMLS...")
-    icd10_map = {}
+    icd10_map: dict[str, str | None] = {}
     if UMLS_API_KEY:
         for condition_name in df_rules["condition"].unique():
             _, code = get_umls_concept(condition_name, "ICD10", UMLS_API_KEY)
@@ -663,6 +720,13 @@ def generate_knowledge_graph():
             print(f"  {condition_name} → {code if code else 'not found'}")
     else:
         print("  WARNING: UMLS API key unavailable — ICD-10 codes will be omitted.")
+
+    # Apply overrides for conditions that UMLS fails to resolve
+    for condition_name, override_code in _ICD10_OVERRIDES.items():
+        if not icd10_map.get(condition_name):
+            icd10_map[condition_name] = override_code
+            print(f"  {condition_name} → {override_code} (override)")
+
     df_rules["icd10_code"] = df_rules["condition"].map(icd10_map)
 
     # 6. ICD-10-CA codes — Canada Health Infoway (reuses existing infoway_token)

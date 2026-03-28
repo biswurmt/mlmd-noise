@@ -587,8 +587,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--kg-path",
-        default="triage_knowledge_graph.pkl",
-        help="Path to the serialized KG .pkl file (default: triage_knowledge_graph.pkl)",
+        default="triage_knowledge_graph_enriched.pkl",
+        help="Path to the serialized KG .pkl file (default: triage_knowledge_graph_enriched.pkl)",
     )
     parser.add_argument(
         "--output",
