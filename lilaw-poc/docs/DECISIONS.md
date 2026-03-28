@@ -113,3 +113,31 @@ These match the paper's Theorems for the expected adaptive behavior of LiLAW und
 - **Formatting/linting:** `ruff`
 - **Type checking:** `ty` (Astral)
 - **Testing:** `pytest` — core tests for gradient flow through LiLAW loss, weight function bounds, noise injection correctness
+
+---
+
+## MedMNIST Replication Experiment
+
+### D14: Symmetric Noise for MedMNIST Replication
+
+The paper's MedMNIST experiments use symmetric noise (uniform random label replacement). We match this exactly to enable direct comparison with published results. This differs from the tabular PoC which used asymmetric positive→negative noise to simulate the EHR setting.
+
+### D15: Clean Validation Set for Early Stopping
+
+Noise is injected into the training set only. The validation set remains clean to enable meaningful early stopping. The paper emphasizes "no clean validation set required" for LiLAW's meta-update, but standard practice for their reported results uses clean validation for model selection.
+
+### D16: Early Stopping on Validation Accuracy
+
+Early stopping monitors validation Top-1 accuracy with patience=10 epochs. Best model state is restored after stopping. This is applied identically to both baseline and LiLAW methods for fair comparison.
+
+### D17: Initial Sweep Scope
+
+BloodMNIST (11,959 train samples, 8 classes) at noise rates 0%, 20%, 40%, 60%, 80% with 3 seeds (42, 123, 456). BloodMNIST chosen for fast iteration (~30-45 min on H100). PathMNIST can be added as a follow-up.
+
+### D18: Code Isolation
+
+All MedMNIST replication code lives in `src/lilaw_poc/medmnist/` subpackage. The existing binary PoC code is untouched. The `lilaw.py` core (weight functions + LiLAWWeighter) is reused without modification — it already operates on generic `s_label`/`s_max` tensors.
+
+### D19: Pretrained Weights
+
+ResNet-18 with ImageNet pretrained weights via `timm`. The paper specifies ImageNet-21K pretraining; `timm`'s default `resnet18` uses ImageNet-1K. If results diverge from the paper, switching to a 21K checkpoint is a candidate fix.
