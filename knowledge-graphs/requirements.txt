@@ -14,3 +14,4 @@ wfdb
 wget
 
 beautifulsoup4>=4.12.0
+boto3>=1.34

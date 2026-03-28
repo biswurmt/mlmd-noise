@@ -6,3 +6,7 @@ pandas
 networkx
 python-dotenv
 pyvis
+neo4j>=5.0
+boto3>=1.34
+openai>=1.0
+azure-identity>=1.17
