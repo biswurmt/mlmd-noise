@@ -15,7 +15,16 @@ set -euo pipefail
 BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
 GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
 REPO="https://${GH_TOKEN}@github.com/biswurmt/mlmd-noise.git"
-GPU_ID="NVIDIA H100 80GB HBM3"
+# GPU priority list: fastest first, fallback to slower if unavailable
+GPU_PRIORITY=(
+  "NVIDIA H100 80GB HBM3"
+  "NVIDIA H100 PCIe"
+  "NVIDIA H100 NVL"
+  "NVIDIA A100-SXM4-80GB"
+  "NVIDIA A100 80GB PCIe"
+  "NVIDIA GeForce RTX 4090"
+  "NVIDIA RTX A6000"
+)
 TEMPLATE_ID="runpod-torch-v240"
 KEY_FILE="${HOME}/.ssh/id_ed25519_runpod"
 
@@ -45,18 +54,35 @@ else
   echo "SSH key already exists: ${KEY_FILE}"
 fi
 
-# ── 2. Create pod ─────────────────────────────────────────────────────────────
-echo "Creating pod (GPU: ${GPU_ID}, template: ${TEMPLATE_ID}) ..."
-POD_JSON=$(runpodctl pod create \
-  --name lilaw-medmnist-sweep-v2 \
-  --template-id "${TEMPLATE_ID}" \
-  --gpu-id "${GPU_ID}" \
-  --cloud-type COMMUNITY \
-  --container-disk-in-gb 30 \
-  --ssh \
-  -o json 2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-POD_ID=$(echo "${POD_JSON}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
-echo "Pod created: ${POD_ID}"
+# ── 2. Create pod (try GPUs in priority order) ────────────────────────────────
+POD_ID=""
+GPU_ID=""
+for candidate in "${GPU_PRIORITY[@]}"; do
+  echo "Trying GPU: ${candidate} ..."
+  POD_JSON=$(runpodctl pod create \
+    --name lilaw-medmnist-sweep-v2 \
+    --template-id "${TEMPLATE_ID}" \
+    --gpu-id "${candidate}" \
+    --cloud-type COMMUNITY \
+    --container-disk-in-gb 30 \
+    --ssh \
+    -o json 2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+  POD_ID=$(echo "${POD_JSON}" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('id', ''))
+except Exception:
+    print('')
+" 2>/dev/null || true)
+  if [[ -n "${POD_ID}" ]]; then
+    GPU_ID="${candidate}"
+    echo "Pod created: ${POD_ID} (GPU: ${GPU_ID})"
+    break
+  fi
+  echo "  unavailable, trying next ..."
+done
+[[ -n "${POD_ID}" ]] || { echo "ERROR: no GPU available from priority list"; exit 1; }
 
 # NOTE: No cleanup trap — pod manages its own lifecycle.
 
