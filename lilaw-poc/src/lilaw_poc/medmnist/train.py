@@ -43,9 +43,9 @@ class TrainResult:
 
 def _move_weighter_to_device(weighter: LiLAWWeighter, device: torch.device) -> None:
     """Move LiLAWWeighter's meta-parameters to the specified device."""
-    weighter.alpha = weighter.alpha.to(device).requires_grad_(True)
-    weighter.beta = weighter.beta.to(device).requires_grad_(True)
-    weighter.delta = weighter.delta.to(device).requires_grad_(True)
+    weighter.alpha = torch.tensor(weighter.alpha.item(), device=device, requires_grad=True)
+    weighter.beta = torch.tensor(weighter.beta.item(), device=device, requires_grad=True)
+    weighter.delta = torch.tensor(weighter.delta.item(), device=device, requires_grad=True)
 
 
 def _eval_accuracy(model: nn.Module, loader: DataLoader, device: torch.device) -> float:
