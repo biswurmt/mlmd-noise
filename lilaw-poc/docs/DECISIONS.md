@@ -141,3 +141,30 @@ All MedMNIST replication code lives in `src/lilaw_poc/medmnist/` subpackage. The
 ### D19: Pretrained Weights
 
 ResNet-18 with ImageNet pretrained weights via `timm`. The paper specifies ImageNet-21K pretraining; `timm`'s default `resnet18` uses ImageNet-1K. If results diverge from the paper, switching to a 21K checkpoint is a candidate fix.
+
+### D20: MedMNIST Sweep Results — BloodMNIST (5 noise rates × 3 seeds)
+
+**Run:** 2026-03-28 on RunPod A100 SXM, 15 experiments, results in `lilaw-poc/results/medmnist/results.json`.
+
+| Noise | Baseline Acc (mean) | LiLAW Acc (mean) | Delta |
+|-------|---------------------|------------------|-------|
+| 0%    | 96.39%              | 96.74%           | +0.35% |
+| 20%   | 94.47%              | 94.13%           | −0.35% |
+| 40%   | 92.94%              | 92.78%           | −0.16% |
+| 60%   | 90.15%              | 89.62%           | −0.53% |
+| 80%   | 82.09%              | 82.59%           | +0.50% |
+
+**0% noise baseline**: 96.4% accuracy — well above the paper's ≥95% expectation for BloodMNIST.
+
+**Key finding: LiLAW does not consistently outperform the baseline.** Differences are within ±1% at all noise rates, with LiLAW trailing at 20–60% noise and showing marginal gains only at 0% and 80%. The paper's claim that LiLAW significantly maintains accuracy under high label noise is **not replicated** on this run.
+
+**Meta-parameter behavior:** `alpha` saturates near 10 (max) across all runs regardless of noise rate. `beta` and `delta` do increase monotonically with noise rate (~2.1→2.7 and ~6.1→7.2 respectively), confirming the weighting mechanism responds to noise. However, this adaptation does not translate to accuracy improvements.
+
+**Hypotheses for the gap vs. paper:**
+
+1. **Epoch budget**: 30 epochs with patience=10 may be insufficient for the meta-learning loop to converge. The paper's reported results likely use longer training. Alpha saturating at ~10 suggests the easy-sample suppression mechanism ran its course early; more epochs may allow beta/delta to provide signal.
+2. **ImageNet-1K vs. 21K pretraining** (D19): The paper uses 21K; a stronger pretrained backbone could sharpen the easy/moderate/hard loss landscape.
+3. **Symmetric noise scale**: At 80% symmetric noise, label information is nearly destroyed — this is where the paper's largest gains occur. Our results do show LiLAW slightly ahead at 80%, consistent with the paper's direction even if not magnitude.
+4. **Meta-update batch size**: If the meta-batch is too small relative to class count (8 classes), the meta-gradient is noisy, weakening the update signal.
+
+**Next steps:** Before concluding LiLAW does not work on image data, try: (a) longer training (60–100 epochs) with larger patience, (b) check meta-batch size, (c) PathMNIST as a harder task where the baseline degrades more sharply.
