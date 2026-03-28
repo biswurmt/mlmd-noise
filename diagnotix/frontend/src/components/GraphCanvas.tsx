@@ -102,6 +102,17 @@ function parseCode(raw: string): { label: string; href: string | null } {
   return { label: raw, href: null };
 }
 
+/** Return an EBI OLS4 URL for HP / MONDO / EFO codes, or undefined otherwise. */
+function ebiCodeHref(raw: string): string | undefined {
+  if (raw.startsWith("HP:"))
+    return `https://www.ebi.ac.uk/ols4/ontologies/hp/terms?obo_id=${encodeURIComponent(raw)}`;
+  if (raw.startsWith("MONDO:"))
+    return `https://www.ebi.ac.uk/ols4/ontologies/mondo/terms?obo_id=${encodeURIComponent(raw)}`;
+  if (raw.startsWith("EFO:"))
+    return `https://www.ebi.ac.uk/ols4/ontologies/efo/terms?obo_id=${encodeURIComponent(raw)}`;
+  return undefined;
+}
+
 function CodeRow({ prefix, raw, hrefOverride }: { prefix: string; raw: string; hrefOverride?: string }) {
   const { label, href } = parseCode(raw);
   const finalHref = hrefOverride ?? href;
@@ -133,7 +144,13 @@ function NodeTooltip({ node, activePathway }: { node: FGNode; activePathway?: st
       {(node.ebi_open_code || node.snomed_ca_code || node.icd10_code ||
         node.icd10ca_code || node.loinc_code || node.rxcui) && (
         <div className="gt-section">
-          {node.ebi_open_code  && <CodeRow prefix="HP/MONDO"  raw={node.ebi_open_code  as string} />}
+          {node.ebi_open_code  && (
+            <CodeRow
+              prefix="HP/MONDO"
+              raw={node.ebi_open_code as string}
+              hrefOverride={ebiCodeHref(node.ebi_open_code as string)}
+            />
+          )}
           {node.snomed_ca_code && <CodeRow prefix="SNOMED-CT" raw={node.snomed_ca_code as string}
             hrefOverride={`https://browser.ihtsdotools.org/?perspective=full&conceptId1=${node.snomed_ca_code}`} />}
           {node.icd10_code     && <CodeRow prefix="ICD-10"    raw={node.icd10_code     as string}

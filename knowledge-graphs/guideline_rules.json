@@ -328,5 +328,181 @@
     "condition": "Acute Appendicitis",
     "test": "Appendix Ultrasound",
     "source": "NICE"
+  },
+  {
+    "_comment": "PATHWAY: Chest X-Ray \u2014 LLM-generated via Diagnotix"
+  },
+  {
+    "raw_symptom": "persistent cough",
+    "node_type": "Symptom",
+    "condition": "Pneumonia",
+    "test": "Chest X-Ray",
+    "source": "IDSA"
+  },
+  {
+    "raw_symptom": "fever and shortness of breath",
+    "node_type": "Symptom",
+    "condition": "Pneumonia",
+    "test": "Chest X-Ray",
+    "source": "WHO"
+  },
+  {
+    "raw_symptom": "tachypnea > 20 breaths/min with respiratory symptoms",
+    "node_type": "Vital_Sign_Threshold",
+    "condition": "Pneumonia",
+    "test": "Chest X-Ray",
+    "source": "IDSA"
+  },
+  {
+    "raw_symptom": "age > 65 years with new onset respiratory symptoms",
+    "node_type": "Demographic_Factor",
+    "condition": "Pneumonia",
+    "test": "Chest X-Ray",
+    "source": "IDSA"
+  },
+  {
+    "raw_symptom": "acute worsening dyspnea",
+    "node_type": "Symptom",
+    "condition": "Pulmonary Edema",
+    "test": "Chest X-Ray",
+    "source": "AHA/ACC",
+    "treatment": "Diuretics"
+  },
+  {
+    "raw_symptom": "history of congestive heart failure with orthopnea",
+    "node_type": "Risk_Factor",
+    "condition": "Pulmonary Edema",
+    "test": "Chest X-Ray",
+    "source": "AHA/ACC"
+  },
+  {
+    "raw_symptom": "sudden onset pleuritic chest pain",
+    "node_type": "Symptom",
+    "condition": "Pneumothorax",
+    "test": "Chest X-Ray",
+    "source": "ACEP"
+  },
+  {
+    "raw_symptom": "chest trauma with respiratory distress",
+    "node_type": "Mechanism_of_Injury",
+    "condition": "Pneumothorax",
+    "test": "Chest X-Ray",
+    "source": "ACEP"
+  },
+  {
+    "raw_symptom": "known COPD with acute exacerbation symptoms (e.g., increased dyspnea, cough, sputum)",
+    "node_type": "Risk_Factor",
+    "condition": "COPD Exacerbation",
+    "test": "Chest X-Ray",
+    "source": "GOLD"
+  },
+  {
+    "raw_symptom": "unilateral wheezing or diminished breath sounds after choking episode",
+    "node_type": "Clinical_Attribute",
+    "condition": "Foreign Body Aspiration",
+    "test": "Chest X-Ray",
+    "source": "ACEP"
+  },
+  {
+    "raw_symptom": "suspected lung mass on other imaging or clinical suspicion",
+    "node_type": "Clinical_Attribute",
+    "condition": "Lung Neoplasm",
+    "test": "Chest X-Ray",
+    "source": "NCCN"
+  },
+  {
+    "raw_symptom": "suspected rib fracture after blunt trauma",
+    "node_type": "Mechanism_of_Injury",
+    "condition": "Rib Fracture",
+    "test": "Chest X-Ray",
+    "source": "ACEP"
+  },
+  {
+    "_comment": "PATHWAY: Ovarian Ultrasound \u2014 LLM-generated via Diagnotix"
+  },
+  {
+    "raw_symptom": "Acute unilateral pelvic pain",
+    "node_type": "Symptom",
+    "condition": "Ovarian Cyst Rupture",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
+  },
+  {
+    "raw_symptom": "Sudden onset severe unilateral pelvic pain with nausea and vomiting",
+    "node_type": "Symptom",
+    "condition": "Ovarian Torsion",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
+  },
+  {
+    "raw_symptom": "Pelvic mass on physical exam",
+    "node_type": "Clinical_Attribute",
+    "condition": "Ovarian Cyst",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
+  },
+  {
+    "raw_symptom": "Positive pregnancy test with abdominal pain and vaginal bleeding",
+    "node_type": "Symptom",
+    "condition": "Ectopic Pregnancy",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
+  },
+  {
+    "raw_symptom": "Elevated beta-hCG with no intrauterine pregnancy visualized on prior ultrasound",
+    "node_type": "Clinical_Attribute",
+    "condition": "Ectopic Pregnancy",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
+  },
+  {
+    "raw_symptom": "Lower abdominal pain with fever, cervical motion tenderness, and abnormal vaginal discharge",
+    "node_type": "Symptom",
+    "condition": "Pelvic Inflammatory Disease",
+    "test": "Ovarian Ultrasound",
+    "source": "CDC"
+  },
+  {
+    "raw_symptom": "Irregular menstrual cycles (oligomenorrhea or amenorrhea)",
+    "node_type": "Symptom",
+    "condition": "Polycystic Ovary Syndrome",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
+  },
+  {
+    "raw_symptom": "Clinical signs of hyperandrogenism (e.g., hirsutism, severe acne)",
+    "node_type": "Clinical_Attribute",
+    "condition": "Polycystic Ovary Syndrome",
+    "test": "Ovarian Ultrasound",
+    "source": "Endocrine Society"
+  },
+  {
+    "raw_symptom": "Palpable adnexal mass with acute, severe pelvic pain",
+    "node_type": "Clinical_Attribute",
+    "condition": "Ovarian Torsion",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
+  },
+  {
+    "raw_symptom": "Hypotension and tachycardia in a patient with acute pelvic pain",
+    "node_type": "Vital_Sign_Threshold",
+    "condition": "Hemorrhagic Ovarian Cyst",
+    "test": "Ovarian Ultrasound",
+    "source": "ACEP"
+  },
+  {
+    "raw_symptom": "Hemodynamic instability with positive pregnancy test and acute pelvic pain",
+    "node_type": "Vital_Sign_Threshold",
+    "condition": "Ruptured Ectopic Pregnancy",
+    "test": "Ovarian Ultrasound",
+    "source": "ACEP",
+    "treatment": "Surgical intervention"
+  },
+  {
+    "raw_symptom": "Known ovarian cyst with increasing size or suspicious features on follow-up imaging",
+    "node_type": "Clinical_Attribute",
+    "condition": "Ovarian Cyst",
+    "test": "Ovarian Ultrasound",
+    "source": "ACOG"
   }
 ]
