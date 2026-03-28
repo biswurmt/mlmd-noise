@@ -280,3 +280,9 @@ CLAUDE.md
 
 # OS generated files
 .DS_Store
+
+# uv lock files (library PoCs — not pinning deps)
+uv.lock
+
+# LaTeX intermediate build output
+presentation-slide/background/out/
