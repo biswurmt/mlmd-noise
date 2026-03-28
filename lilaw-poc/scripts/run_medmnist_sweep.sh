@@ -39,7 +39,7 @@ import tomllib, pathlib, os
 p = pathlib.Path(os.path.expanduser('~/.runpod/config.toml'))
 if p.exists():
     d = tomllib.loads(p.read_text())
-    print(d.get('default', {}).get('api_key', d.get('api_key', '')))
+    print(d.get('default', {}).get('api_key', d.get('api_key', d.get('apikey', ''))))
 " 2>/dev/null || true)
 fi
 
