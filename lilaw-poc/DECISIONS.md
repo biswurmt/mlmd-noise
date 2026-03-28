@@ -60,7 +60,19 @@ For each (dataset, noise_rate), compare vanilla BCE baseline vs LiLAW-weighted B
 
 3 random seeds per experiment, reporting mean ± std.
 
-### D10: Engineering Guardrails
+### D10: Training Step Weight Detachment
+
+In the training step, `w_total.detach()` is applied before weighting the per-sample BCE loss. This means the model sees constant per-sample weights and cannot learn to shape its predictions in a way that accounts for how the LiLAW weight function responds. This matches Algorithm 1 from the paper: meta-parameters are frozen during the training update, and the model treats the current weights as fixed importance-sampling coefficients. The alternative (keeping `w_total` differentiable) would let the model's gradient be scaled by the weight function's curvature, potentially improving moderate-sample handling via the RBF shape. This is a candidate ablation for future experiments.
+
+### D11: Verification — Gradient Sign Properties
+
+Empirically verified (via `test_lilaw.py::test_alpha_gradient_non_negative` and `test_beta_gradient_non_positive`) that:
+- **d(W_alpha)/d(alpha) >= 0**: Alpha gradient is non-negative, so SGD decreases alpha over training (down-weighting easy samples more over time).
+- **d(W_beta)/d(beta) <= 0**: Beta gradient is non-positive, so SGD increases beta over training (down-weighting hard/noisy samples more over time).
+
+These match the paper's Theorems for the expected adaptive behavior of LiLAW under noisy labels.
+
+### D12: Engineering Guardrails
 
 - **Package management:** `uv`
 - **Formatting/linting:** `ruff`

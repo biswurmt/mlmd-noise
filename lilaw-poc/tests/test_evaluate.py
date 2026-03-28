@@ -36,8 +36,8 @@ class TestComputeRecallAtPpv:
 
     def test_returns_zero_when_ppv_unachievable(self) -> None:
         """If PPV threshold can never be met, return 0.0."""
+        # All high-scoring samples are negatives, so PPV at any threshold is low
         y_true = torch.tensor([0, 0, 0, 0, 1])
         y_scores = torch.tensor([0.9, 0.8, 0.7, 0.6, 0.5])
         recall = compute_recall_at_ppv(y_true, y_scores, min_ppv=0.99)
-        # With these scores, top predictions are all negative — PPV is low
-        assert recall == pytest.approx(0.0) or recall <= 1.0  # implementation-dependent
+        assert recall == pytest.approx(0.0)

@@ -41,7 +41,6 @@ class ExperimentResult:
 def run_single_experiment(config: ExperimentConfig) -> ExperimentResult:
     """Run one experiment: baseline vs LiLAW on a dataset+noise combination."""
     torch.manual_seed(config.seed)
-    np.random.seed(config.seed)  # noqa: NPY002
     rng = np.random.default_rng(config.seed)
 
     # Load data

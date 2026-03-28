@@ -76,6 +76,40 @@ class TestLiLAWWeighter:
         assert weighter.beta.grad is not None
         assert weighter.delta.grad is not None
 
+    def test_alpha_gradient_non_negative(self) -> None:
+        """Per the paper, dL/d(alpha) >= 0: alpha should decrease during training.
+
+        The gradient of W_alpha w.r.t. alpha is sigmoid'(alpha*s_label - s_max) * s_label,
+        which is always non-negative since sigmoid' >= 0 and s_label >= 0.
+        """
+        weighter = LiLAWWeighter()
+        # Use detached s_label/s_max (constants) as in the meta-update step
+        s_label = torch.tensor([0.3, 0.5, 0.7, 0.9])
+        s_max = torch.tensor([0.7, 0.5, 0.7, 0.9])
+        w_a, _, _, _ = weighter.compute_weights(s_label, s_max)
+        # Sum of W_alpha as a scalar loss proxy
+        w_a.sum().backward()
+        assert weighter.alpha.grad is not None
+        assert weighter.alpha.grad.item() >= 0.0, (
+            f"alpha gradient should be non-negative, got {weighter.alpha.grad.item()}"
+        )
+
+    def test_beta_gradient_non_positive(self) -> None:
+        """Per the paper, dL/d(beta) <= 0: beta should increase during training.
+
+        The gradient of W_beta w.r.t. beta is -sigmoid'(-(beta*s_label - s_max)) * s_label,
+        which is always non-positive since sigmoid' >= 0 and s_label >= 0.
+        """
+        weighter = LiLAWWeighter()
+        s_label = torch.tensor([0.3, 0.5, 0.7, 0.9])
+        s_max = torch.tensor([0.7, 0.5, 0.7, 0.9])
+        _, w_b, _, _ = weighter.compute_weights(s_label, s_max)
+        w_b.sum().backward()
+        assert weighter.beta.grad is not None
+        assert weighter.beta.grad.item() <= 0.0, (
+            f"beta gradient should be non-positive, got {weighter.beta.grad.item()}"
+        )
+
     def test_meta_update_changes_params(self) -> None:
         """A manual SGD step should change alpha, beta, delta."""
         weighter = LiLAWWeighter()
