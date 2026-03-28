@@ -1,0 +1,39 @@
+name: Build Vector DB
+
+on:
+  workflow_dispatch:  # manual trigger only
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install qdrant-client openai python-dotenv pandas pyarrow
+
+      - name: Download remaining docs from GitHub release
+        run: |
+          curl -L \
+            https://github.com/biswurmt/mlmd-noise/releases/download/v0.1-guidelines-data/guidelines_remaining.parquet \
+            -o guidelines_remaining.parquet
+          echo "Downloaded $(du -sh guidelines_remaining.parquet | cut -f1)"
+
+      - name: Run vector DB indexer
+        env:
+          NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          NEBIUS_EMBEDDING_MODEL: intfloat/e5-mistral-7b-instruct
+        run: |
+          python -u knowledge-graphs/vector_db/build_vector_db.py \
+            --parquet guidelines_remaining.parquet

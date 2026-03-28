@@ -39,6 +39,7 @@ QUERY_INSTRUCTION = (
     "Instruct: Retrieve highly technical passages that answer the following query.\nQuery: "
 )
 DATA_PATH = Path(__file__).parent.parent / "data" / "guidelines_filtered" / "combined"
+CHECKPOINT_PATH = Path(__file__).parent / ".index_checkpoint.json"
 
 # ── Lazy-initialized clients ──────────────────────────────────────────────────
 _embed_client = None
@@ -232,26 +233,40 @@ def query_guidelines(
 
 
 # ── Indexing ──────────────────────────────────────────────────────────────────
-def build_index(source_filter: str = None):
-    """Load, filter, chunk, embed, and upsert guidelines into Qdrant."""
-    from datasets import load_from_disk
+def build_index(source_filter: str = None, parquet_path: str = None):
+    """Load, filter, chunk, embed, and upsert guidelines into Qdrant.
+
+    Args:
+        source_filter: Restrict to a single source (e.g. 'cma'). Only used
+                       when loading from the full Arrow dataset.
+        parquet_path:  Path to a pre-filtered parquet file (e.g. from a
+                       GitHub release). Skips the Arrow dataset load and the
+                       min-length/dedup filters — the parquet is already clean.
+    """
+    import pandas as pd
     from qdrant_client.models import PointStruct
 
-    # 1. Load combined dataset
-    print(f"Loading dataset from {DATA_PATH} ...")
-    ds = load_from_disk(str(DATA_PATH))
-    df = ds.to_pandas()
-    print(f"Loaded {len(df)} docs")
+    # 1. Load dataset — parquet (CI/resume) or full Arrow dataset (local)
+    if parquet_path:
+        print(f"Loading pre-filtered dataset from {parquet_path} ...")
+        df = pd.read_parquet(parquet_path)
+        print(f"Loaded {len(df)} docs (pre-filtered)")
+    else:
+        from datasets import load_from_disk
+        print(f"Loading dataset from {DATA_PATH} ...")
+        ds = load_from_disk(str(DATA_PATH))
+        df = ds.to_pandas()
+        print(f"Loaded {len(df)} docs")
 
-    # 2. Filter: minimum text length
-    before = len(df)
-    df = df[df["clean_text"].str.len() >= MIN_TEXT_LENGTH]
-    print(f"Min length filter ({MIN_TEXT_LENGTH} chars): {before} → {len(df)} docs")
+        # 2. Filter: minimum text length
+        before = len(df)
+        df = df[df["clean_text"].str.len() >= MIN_TEXT_LENGTH]
+        print(f"Min length filter ({MIN_TEXT_LENGTH} chars): {before} → {len(df)} docs")
 
-    # 3. Filter: deduplicate by title
-    before = len(df)
-    df = df.drop_duplicates(subset=["title"], keep="first")
-    print(f"Dedup by title: {before} → {len(df)} docs")
+        # 3. Filter: deduplicate by title
+        before = len(df)
+        df = df.drop_duplicates(subset=["title"], keep="first")
+        print(f"Dedup by title: {before} → {len(df)} docs")
 
     # 4. Optional source filter for gauge runs
     if source_filter:
@@ -266,7 +281,27 @@ def build_index(source_filter: str = None):
     # 5. Ensure Qdrant collection exists
     ensure_collection()
 
-    # 6. Stream through docs: chunk → embed → upsert without holding all chunks in memory
+    # 6. Fetch already-indexed doc_ids from Qdrant to enable safe resume
+    print("Fetching indexed doc_ids from Qdrant for resume detection ...")
+    indexed_doc_ids: set[str] = set()
+    offset = None
+    while True:
+        points, offset = _get_qdrant().scroll(
+            collection_name=COLLECTION_NAME,
+            with_payload=["doc_id"],
+            with_vectors=False,
+            limit=1000,
+            offset=offset,
+        )
+        for p in points:
+            if p.payload and "doc_id" in p.payload:
+                indexed_doc_ids.add(p.payload["doc_id"])
+        if offset is None:
+            break
+    if indexed_doc_ids:
+        print(f"  {len(indexed_doc_ids)} doc(s) already indexed — will skip.")
+
+    # 7. Stream through docs: chunk → embed → upsert without holding all chunks in memory
     print(f"Streaming {len(df)} docs → chunking, embedding, upserting ...")
     qdrant = _get_qdrant()
     indexed = 0
@@ -293,6 +328,8 @@ def build_index(source_filter: str = None):
 
     for doc_num, (_, row) in enumerate(df.iterrows(), 1):
         doc_id = str(row["id"])
+        if doc_id in indexed_doc_ids:
+            continue  # already fully indexed — skip
         text_chunks = chunk_text(str(row["clean_text"]))
         for i, chunk in enumerate(text_chunks):
             payload = {
@@ -349,6 +386,11 @@ def main():
         metavar="TEST",
         help="Filter query results by diagnostic test (e.g. ecg, arm_xray).",
     )
+    parser.add_argument(
+        "--parquet",
+        metavar="PATH",
+        help="Path to a pre-filtered parquet file to index (skips full dataset load).",
+    )
     args = parser.parse_args()
 
     if args.query:
@@ -366,7 +408,7 @@ def main():
             print(f"    matched: {r['matched_text'][:200]}...")
             print(f"    context: {r['context'][:500]}...")
     else:
-        build_index(source_filter=args.source)
+        build_index(source_filter=args.source, parquet_path=args.parquet)
 
 
 if __name__ == "__main__":
