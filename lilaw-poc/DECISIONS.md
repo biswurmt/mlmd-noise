@@ -72,6 +72,41 @@ Empirically verified (via `test_lilaw.py::test_alpha_gradient_non_negative` and 
 
 These match the paper's Theorems for the expected adaptive behavior of LiLAW under noisy labels.
 
+### D13: PoC Sweep Results and Calibration Against the Paper
+
+**Observations (full sweep: 3 datasets × 4 noise rates × 3 seeds, 50 epochs, asymmetric positive→negative noise):**
+
+| Dataset | Noise | Baseline PR-AUC | LiLAW PR-AUC | Baseline Rec@PPV80 | LiLAW Rec@PPV80 |
+|---|---|---|---|---|---|
+| adult | 10% | 0.6924±0.0192 | 0.7016±0.0173 | 0.2759±0.0903 | 0.2964±0.1010 |
+| adult | 20% | 0.6908±0.0163 | 0.6994±0.0179 | 0.2953±0.0738 | 0.2943±0.0934 |
+| adult | 30% | 0.6856±0.0144 | 0.6998±0.0192 | 0.2947±0.0516 | 0.2971±0.0880 |
+| adult | 40% | 0.6790±0.0148 | 0.6993±0.0181 | 0.2901±0.0603 | 0.3109±0.0810 |
+| breast_cancer | 10% | 0.8114±0.2101 | 0.8349±0.1931 | 0.6480±0.4517 | 0.6604±0.4604 |
+| breast_cancer | 20% | 0.8044±0.2187 | 0.8260±0.2023 | 0.6449±0.4561 | 0.6604±0.4604 |
+| breast_cancer | 30% | 0.7979±0.2187 | 0.8164±0.2054 | 0.6417±0.4538 | 0.6604±0.4604 |
+| breast_cancer | 40% | 0.7937±0.2202 | 0.8073±0.2133 | 0.6417±0.4538 | 0.6573±0.4648 |
+| pima | 10% | 0.5613±0.0140 | 0.5701±0.0133 | 0.1152±0.0869 | 0.0947±0.0686 |
+| pima | 20% | 0.5377±0.0130 | 0.5438±0.0155 | 0.0823±0.0582 | 0.0700±0.0517 |
+| pima | 30% | 0.5153±0.0141 | 0.5103±0.0130 | 0.0988±0.0698 | 0.0329±0.0466 |
+| pima | 40% | 0.4980±0.0096 | 0.4904±0.0139 | 0.0412±0.0582 | 0.0329±0.0466 |
+
+**Pattern:** LiLAW consistently improves PR-AUC by ~1–2% on `adult` across all noise rates, and shows a directional improvement on `breast_cancer` (large variance due to seed 456 collapsing). On `pima`, gains are marginal at low noise and turn negative at 30–40%.
+
+**These gains are much smaller than the paper's headline numbers** (e.g. +17% Top-1 accuracy at 50% symmetric noise on CIFAR-100-M, +40% at 50% asymmetric noise). The following hypotheses explain the gap:
+
+1. **Noise rate and baseline degradation**: The paper's large gains occur when the baseline collapses under heavy noise (40–90% symmetric, where CIFAR-100-M baseline drops to ~58% accuracy). Our 10–40% asymmetric noise barely degrades strong baselines — `adult` baseline holds at ~0.69 PR-AUC across all noise rates, leaving little room for recovery.
+
+2. **Asymmetric vs. symmetric noise**: Our noise is unidirectional (positive→negative flips only). The paper's theoretical guarantees ("provably improves under diagonally dominant label noise") are formulated for symmetric noise. With asymmetric noise, hard-noisy samples are indistinguishable from hard-clean samples in loss space, making the weight signal weaker.
+
+3. **Saturated baseline on easy datasets**: `breast_cancer` PR-AUC is ~0.95–0.97 at low noise in favorable seeds — mathematically bounded near ceiling. The paper demonstrates LiLAW on datasets where the task is genuinely hard even without noise.
+
+4. **Tabular vs. image feature richness**: The easy/moderate/hard difficulty spectrum that LiLAW exploits is richer for complex visual features (CIFAR, MedMNIST) than for 30–108 tabular features. On tabular data, per-sample loss distributions are more uniform, so the weighting provides less signal.
+
+5. **Pima negative results at high noise**: 768 samples is tiny. Meta-update validation batches become very noisy, corrupting the meta-gradient signal. The paper's Theorem requires sufficiently clean loss geometry for LiLAW to provably improve; at 30–40% asymmetric noise on a small dataset this condition is likely violated.
+
+**Implication for MLMD**: The MLMD setting (large structured EHR features, moderate asymmetric noise from unobserved external tests) most closely resembles `adult`. A consistent ~1–2% PR-AUC lift is plausible and clinically meaningful at scale, but should not be expected to match the paper's image-data gains. The `pima` failure mode at high noise is a risk flag if MLMD noise rates exceed ~25%.
+
 ### D12: Engineering Guardrails
 
 - **Package management:** `uv`
