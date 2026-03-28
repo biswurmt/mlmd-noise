@@ -5,9 +5,10 @@ from torch import nn
 
 
 def build_resnet18(num_classes: int, *, pretrained: bool = True) -> nn.Module:
-    """Build ResNet-18 with ImageNet-21K pretraining and custom head.
+    """Build ResNet-18 with ImageNet-1K pretraining and custom head.
 
-    Uses timm to load ImageNet-21K pretrained weights, matching the LiLAW paper.
+    Uses timm default: resnet18.a1_in1k (ImageNet-1K). No ResNet-18 21K weights
+    exist in timm; the paper's "21K" claim likely applies to ViT variants only.
     Returns raw logits (no softmax).
 
     Args:
