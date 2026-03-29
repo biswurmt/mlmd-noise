@@ -151,11 +151,12 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: width 0.22s ease;
 }
 
-/* In chat mode the sidebar must not double-scroll; chat-panel handles its own scroll */
-.sidebar:has(.chat-panel) {
-  overflow: hidden;
+.sidebar--analyze {
+  width: 360px;
+  overflow: hidden; /* chat-panel handles its own inner scroll */
 }
 
 /* ─── Pathway picker ─────────────────────────────────────────────────────────── */

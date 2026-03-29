@@ -186,7 +186,7 @@ export default function App() {
       {/* ── Body ── */}
       <div className="body">
         {/* Sidebar */}
-        <aside className="sidebar">
+        <aside className={`sidebar${chatMode ? " sidebar--analyze" : ""}`}>
 
           {/* ── Mode toggle ── */}
           <div className="sidebar-mode-toggle">
@@ -194,7 +194,7 @@ export default function App() {
               className={`mode-btn${!chatMode ? " active" : ""}`}
               onClick={() => { setChatMode(false); setChatHoveredNodeId(null); }}
             >
-              Graph
+              Navigate
             </button>
             <button
               className={`mode-btn${chatMode ? " active" : ""}`}
@@ -207,7 +207,7 @@ export default function App() {
                 setChatMode(true);
               }}
             >
-              Chat
+              Analyze
             </button>
           </div>
 

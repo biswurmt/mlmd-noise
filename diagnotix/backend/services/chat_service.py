@@ -1,10 +1,10 @@
-"""chat_service.py — Anthropic-backed clinical decision-support chat."""
+"""chat_service.py — Nebius-backed clinical decision-support chat."""
 from __future__ import annotations
 
 import os
 from typing import Any
 
-import anthropic
+from openai import OpenAI
 
 from backend.models.schemas import ChatRequest
 
@@ -13,42 +13,30 @@ from backend.models.schemas import ChatRequest
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT_TEMPLATE = """\
-You are a clinical decision-support assistant embedded in Diagnotix, a medical \
-knowledge graph tool used by emergency department clinicians — triage nurses and \
-emergency physicians.
+You are a clinical reasoning assistant working alongside emergency department \
+clinicians — triage nurses and emergency physicians. You have access to a \
+structured knowledge graph encoding triage rules, diagnostic pathways, and \
+evidence weights derived from published guidelines and medical literature.
 
-Your role is to help interpret the current triage knowledge graph, support \
-clinical reasoning at the point of care, and provide evidence-based guidance \
-grounded in published guidelines.
+When responding, open with a brief, direct orientation to what the knowledge \
+graph shows on the topic: the key relationships, notable co-occurrence counts \
+or trial numbers, and what they imply. Keep this grounding tight — a few \
+sentences at most, not a data dump. Then move into synthesis: bring your \
+broader clinical knowledge to bear, reason through the presentation, and let \
+the graph evidence surface naturally where it strengthens the argument. The \
+goal is a response that reads like a knowledgeable colleague thinking aloud, \
+not a structured report citing sources. Quantitative evidence from the graph \
+(article counts, trial numbers, guideline sources) should feel like supporting \
+colour, not scaffolding.
 
-## Guidelines
+Use standard emergency medicine terminology and assume clinical fluency in your \
+reader. Be concise. For lists of findings, differentials, or actions, use \
+bullet points. Acknowledge genuine diagnostic uncertainty when it matters, and \
+flag when specialist input or immediate stabilisation takes priority.
 
-1. **Ground responses in the knowledge graph.** Cite specific nodes, relationship \
-types, co-occurrence counts (literature_articles, literature_patents), and \
-trial_count values when they support your reasoning. Numbers from the graph are \
-authoritative.
-
-2. **Supplement with general medical knowledge** where the graph is silent, but \
-flag it clearly (e.g. "Outside the current graph: …").
-
-3. **Use standard clinical terminology** appropriate for emergency medicine \
-colleagues. Assume working knowledge of vitals, triage protocols, and common \
-diagnostic procedures.
-
-4. **Cite nodes by their exact label.** When referencing a specific node from the \
-knowledge graph, use its exact label name as it appears in the "NODES" section \
-below (e.g. "Chest Pain", "STEMI", "Abdominal Ultrasound"). Do **not** use the \
-"Type: Label" prefix format — just the label. Only reference labels that appear \
-verbatim in the graph context below.
-
-5. **Be concise and actionable.** Lead with the most clinically important \
-information. Use bullet points for differentials, test lists, or findings. \
-Emergency clinicians need fast answers.
-
-6. **Acknowledge uncertainty.** Recommend specialist escalation when appropriate. \
-This tool supports — never replaces — clinical judgment and institutional protocols.
-
-7. **For critical presentations**, prioritise stabilisation before further workup.
+When naming a specific clinical concept drawn from the knowledge graph, use its \
+exact label as it appears in the NODES section below — the plain label only, \
+without any "Type:" prefix.
 
 ## Current Knowledge Graph Context
 
@@ -125,25 +113,30 @@ def _serialize_kg(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], path
 
 
 # ---------------------------------------------------------------------------
-# Anthropic call (synchronous — run via asyncio.to_thread)
+# Gemini call (synchronous — run via asyncio.to_thread)
 # ---------------------------------------------------------------------------
 
 def sync_chat(req: ChatRequest) -> str:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("NEBIUS_API_KEY")
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set")
+        raise ValueError("NEBIUS_API_KEY not set")
 
     kg_context = _serialize_kg(req.context.nodes, req.context.edges, req.context.pathway)
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(kg_context=kg_context)
 
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=system_prompt,
-        messages=[
-            *[{"role": m.role, "content": m.content} for m in req.history],
-            {"role": "user", "content": req.message},
-        ],
+    client = OpenAI(
+        base_url="https://api.tokenfactory.us-central1.nebius.com/v1/",
+        api_key=api_key,
     )
-    return response.content[0].text  # type: ignore[index]
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        *[{"role": m.role, "content": m.content} for m in req.history],
+        {"role": "user", "content": req.message},
+    ]
+
+    response = client.chat.completions.create(
+        model="moonshotai/Kimi-K2.5-fast",
+        messages=messages,
+    )
+    return response.choices[0].message.content
