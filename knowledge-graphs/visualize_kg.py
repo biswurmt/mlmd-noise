@@ -1,3 +1,4 @@
+import argparse
 import math
 import pickle
 import pandas as pd
@@ -25,12 +26,21 @@ def visualize_interactive_kg(G):
     # Add nodes with their specific colors and titles (hover text)
     for node_id, node_data in G.nodes(data=True):
         node_type = node_data.get("type", "Unknown")
-        color = color_map.get(node_type, "#cccccc")
-        
+        # ClinGraph-sourced nodes get a distinct colour and diamond shape
+        is_clingraph = node_data.get("source") == "ClinGraph"
+        if is_clingraph:
+            color = "#d4a0ff"   # Lavender — visually distinct from guideline nodes
+            shape = "diamond"
+        else:
+            color = color_map.get(node_type, "#cccccc")
+            shape = "dot"
+
         # Create a hover text string containing the metadata (e.g., SNOMED codes)
         hover_text = f"Type: {node_type}\n"
+        if is_clingraph:
+            hover_text += "Source: ClinGraph\n"
         for key, value in node_data.items():
-            if key == "type":
+            if key in ("type", "source"):
                 continue
             # pd.notna() raises ValueError on lists/arrays — check type first
             if isinstance(value, list):
@@ -38,8 +48,8 @@ def visualize_interactive_kg(G):
                     hover_text += f"{key}: {', '.join(str(v) for v in value)}\n"
             elif pd.notna(value):
                 hover_text += f"{key}: {value}\n"
-                
-        net.add_node(node_id, label=node_id, title=hover_text, color=color, shape="dot")
+
+        net.add_node(node_id, label=node_id, title=hover_text, color=color, shape=shape)
         
     # Add edges with relationship labels, guideline source, and evidence weights
     for source, target, edge_data in G.edges(data=True):
@@ -84,8 +94,23 @@ def visualize_interactive_kg(G):
     print(f"Graph saved as {output_file}. Open this file in your web browser!")
 
 # --- Load and Visualize ---
-print("Loading Knowledge Graph...")
-with open('triage_knowledge_graph.pkl', 'rb') as f:
+parser = argparse.ArgumentParser(description="Visualise the triage KG as an interactive HTML.")
+parser.add_argument(
+    "--pkl",
+    default="triage_knowledge_graph_enriched.pkl",
+    help="Path to the KG pickle file (default: triage_knowledge_graph_enriched.pkl). "
+         "Falls back to triage_knowledge_graph.pkl if the enriched file is not found.",
+)
+args = parser.parse_args()
+
+import os
+pkl_path = args.pkl
+if not os.path.exists(pkl_path) and pkl_path == "triage_knowledge_graph_enriched.pkl":
+    pkl_path = "triage_knowledge_graph.pkl"
+    print(f"Enriched PKL not found; falling back to {pkl_path}")
+
+print(f"Loading Knowledge Graph from {pkl_path} ...")
+with open(pkl_path, 'rb') as f:
     loaded_kg = pickle.load(f)
 
 print(f"Successfully loaded graph with {loaded_kg.number_of_nodes()} nodes.")

@@ -19,6 +19,14 @@ import os
 import re
 import sys
 
+from dotenv import load_dotenv
+
+# Load repo root .env (two levels up from diagnotix/backend/services/)
+load_dotenv(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")),
+    override=False,
+)
+
 from backend.models.schemas import AddTestResponse
 from backend.services.graph_service import get_existing_node_ids, load_graph_json
 
@@ -31,10 +39,49 @@ _KG_DIR = os.path.abspath(
 if _KG_DIR not in sys.path:
     sys.path.insert(0, _KG_DIR)
 
+_VECTOR_DB_DIR = os.path.join(_KG_DIR, "vector_db")
+if _VECTOR_DB_DIR not in sys.path:
+    sys.path.insert(0, _VECTOR_DB_DIR)
+
 from build_kg import generate_knowledge_graph  # noqa: E402
 from audit_guidelines import _normalise_rule, run_grounded_verify_pass  # noqa: E402
+try:
+    from build_vector_db import query_guidelines as _query_guidelines
+    _RAG_AVAILABLE = True
+except Exception:
+    _RAG_AVAILABLE = False
 
 _RULES_FILE = os.path.join(_KG_DIR, "guideline_rules.json")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RAG helper — retrieves grounding passages from the Qdrant vector DB
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _retrieve_rag_context(diagnostic_test: str, n_results: int = 5) -> str:
+    """Return a formatted block of guideline passages for the given test.
+
+    Queries the Qdrant vector DB using the instruction-tuned e5-mistral embeddings.
+    Returns an empty string when the vector DB is unavailable so callers degrade
+    gracefully to LLM training knowledge.
+    """
+    if not _RAG_AVAILABLE:
+        return ""
+    try:
+        hits = _query_guidelines(diagnostic_test, n_results=n_results)
+        if not hits:
+            return ""
+        lines = ["[GUIDELINE PASSAGES — retrieved from filtered medical guidelines corpus]"]
+        for i, h in enumerate(hits, 1):
+            lines.append(
+                f"\n[{i}] Source: {h['source']} | Test: {h['diagnostic_tests']}\n"
+                f"Title: {h['title']}\n"
+                f"{h['context']}"
+            )
+        lines.append("[/GUIDELINE PASSAGES]")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM client — controlled by LLM_PROVIDER env var ("azure" or "nebius").
@@ -401,6 +448,7 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
     existing_node_ids = get_existing_node_ids()
 
     # ── 2. LLM extraction ────────────────────────────────────────────────────
+    rag_context = _retrieve_rag_context(diagnostic_test)
     user_message = (
         f'Generate triage rules for the diagnostic test: "{diagnostic_test}"\n\n'
         f"The system already encodes rules from AHA/ACC, CTAS, ACR, and NICE. "
@@ -411,6 +459,7 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
         f"Cover at least 3–4 different conditions this test can diagnose and include "
         f"a mix of node types (Symptom, Vital_Sign_Threshold, Risk_Factor, etc.).\n\n"
         f'IMPORTANT: the "test" field must be exactly "{diagnostic_test}" for every rule.'
+        + (f"\n\n{rag_context}" if rag_context else "")
     )
 
     # Attach Bing Search grounding when a key is configured so the model can

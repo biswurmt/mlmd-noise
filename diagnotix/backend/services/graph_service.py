@@ -22,7 +22,7 @@ from typing import Any
 _KG_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "knowledge-graphs")
 )
-PKL_PATH = os.path.join(_KG_DIR, "triage_knowledge_graph.pkl")
+PKL_PATH = os.path.join(_KG_DIR, "triage_knowledge_graph_enriched.pkl")
 
 
 def _clean(v: Any) -> Any:

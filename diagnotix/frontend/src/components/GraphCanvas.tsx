@@ -7,6 +7,7 @@ const LINK_COLORS: Record<string, string> = {
   INDICATES_CONDITION:     "#58a6ff",
   REQUIRES_TEST:           "#e8a838",
   DIRECTLY_INDICATES_TEST: "#3fb950",
+  CLINGRAPH_RELATED:       "#9b59b6",
 };
 const DEFAULT_LINK_COLOR    = "#6e7681";
 const NEW_HIGHLIGHT_COLOR   = "#ffffff";
@@ -24,6 +25,7 @@ interface FGNode extends Record<string, unknown> {
   snomed_ca_code?:  string;
   icd10_code?:      string;
   icd10ca_code?:    string;
+  icd10cm_code?:    string;
   loinc_code?:      string;
   rxcui?:           string;
   guideline_source?: string;
@@ -132,16 +134,18 @@ function NodeTooltip({ node, activePathway }: { node: FGNode; activePathway?: st
 
       {/* ── Ontology codes ── */}
       {(node.ebi_open_code || node.snomed_ca_code || node.icd10_code ||
-        node.icd10ca_code || node.loinc_code || node.rxcui) && (
+        node.icd10ca_code || node.icd10cm_code || node.loinc_code || node.rxcui) && (
         <div className="gt-section">
-          {node.ebi_open_code  && <CodeRow prefix="HP/MONDO"  raw={node.ebi_open_code  as string} />}
-          {node.snomed_ca_code && <CodeRow prefix="SNOMED-CT" raw={node.snomed_ca_code as string}
+          {node.ebi_open_code  && <CodeRow prefix="HP/MONDO"   raw={node.ebi_open_code  as string} />}
+          {node.snomed_ca_code && <CodeRow prefix="SNOMED-CT"  raw={node.snomed_ca_code as string}
             hrefOverride={`https://browser.ihtsdotools.org/?perspective=full&conceptId1=${node.snomed_ca_code}`} />}
-          {node.icd10_code     && <CodeRow prefix="ICD-10"    raw={node.icd10_code     as string}
+          {node.icd10_code     && <CodeRow prefix="ICD-10"     raw={node.icd10_code     as string}
             hrefOverride={`https://icd.who.int/browse10/2019/en#/${parseCode(node.icd10_code as string).label}`} />}
-          {node.icd10ca_code   && <CodeRow prefix="ICD-10-CA" raw={node.icd10ca_code   as string} />}
-          {node.loinc_code     && <CodeRow prefix="LOINC"     raw={node.loinc_code     as string} />}
-          {node.rxcui          && <CodeRow prefix="RxCUI"     raw={node.rxcui          as string} />}
+          {node.icd10ca_code   && <CodeRow prefix="ICD-10-CA"  raw={node.icd10ca_code   as string} />}
+          {node.icd10cm_code   && <CodeRow prefix="ICD-10-CM"  raw={node.icd10cm_code   as string}
+            hrefOverride={`https://www.icd10data.com/ICD10CM/Codes/${node.icd10cm_code}`} />}
+          {node.loinc_code     && <CodeRow prefix="LOINC"      raw={node.loinc_code     as string} />}
+          {node.rxcui          && <CodeRow prefix="RxCUI"      raw={node.rxcui          as string} />}
         </div>
       )}
 
@@ -384,7 +388,8 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway, h
       globalScale: number
     ) => {
       const label = link.relationship;
-      if (!label) return;
+      // Skip labels on ClinGraph edges — too many to render cleanly
+      if (!label || label === "CLINGRAPH_RELATED") return;
 
       const src = link.source as FGNode;
       const tgt = link.target as FGNode;
@@ -444,7 +449,9 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway, h
         linkTarget="target"
         linkColor={linkColor}
         linkWidth={linkWidth}
-        linkDirectionalArrowLength={6}
+        linkDirectionalArrowLength={(link: FGLink) =>
+          (link as FGLink).relationship === "CLINGRAPH_RELATED" ? 0 : 6
+        }
         linkDirectionalArrowRelPos={1}
         linkDirectionalArrowColor={linkColor}
         linkCanvasObject={paintLink}

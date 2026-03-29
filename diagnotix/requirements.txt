@@ -8,3 +8,6 @@ pandas
 networkx
 python-dotenv
 pyvis
+openai
+anthropic
+beautifulsoup4

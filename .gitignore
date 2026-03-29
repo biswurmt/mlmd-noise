@@ -208,12 +208,22 @@ __marimo__/
 
 # ── Project-specific ──────────────────────────────────────────────────────────
 
+# Vector DB indexing checkpoint — tracks resume position, auto-deleted on completion
+knowledge-graphs/vector_db/.index_checkpoint.json
+
+# ClinGraph data — large CSV files downloaded from Harvard Dataverse, auto-excluded by *.csv
+knowledge-graphs/clingraph_data/
+
+# KG pipeline data — inputs/outputs stored locally, auto-excluded
+knowledge-graphs/data/
+
 # Secrets — never commit API keys or OAuth credentials
 knowledge-graphs/.env
 data-processing/.env
 
 # Pickle files — binary, auto-regenerated, never commit
 *.pkl
+!knowledge-graphs/triage_knowledge_graph_enriched.pkl
 
 # Generated graph artefacts
 knowledge-graphs/*.html

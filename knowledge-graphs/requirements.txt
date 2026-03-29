@@ -14,3 +14,7 @@ wfdb
 wget
 
 beautifulsoup4>=4.12.0
+
+# --- Vector DB & Embeddings ---
+qdrant-client>=1.9.0
+datasets>=2.0.0
