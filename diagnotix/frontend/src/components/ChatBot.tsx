@@ -34,6 +34,12 @@ function buildNodeIndex(nodes: GraphNode[]): NodeEntry[] {
     .sort((a, b) => b.label.length - a.label.length); // longest-first
 }
 
+// Void HTML elements — React 19 throws if you pass children to these
+const VOID_ELEMENTS = new Set([
+  "area","base","br","col","embed","hr","img","input",
+  "link","meta","param","source","track","wbr",
+]);
+
 // ── Text enrichment ────────────────────────────────────────────────────────────
 
 type Segment =
@@ -98,6 +104,8 @@ function enrichChildren(
     if (typeof child === "string") return enrichString(child, index, onHoverNode, `d${depth}-${i}`);
     if (child && typeof child === "object" && "props" in (child as object)) {
       const el = child as React.ReactElement<{ children?: React.ReactNode }>;
+      // Void elements (br, hr, img, etc.) cannot have children in React 19 — pass through unchanged
+      if (typeof el.type === "string" && VOID_ELEMENTS.has(el.type)) return el;
       return React.cloneElement(el, {}, enrichChildren(el.props.children, index, onHoverNode, depth + 1));
     }
     return child;

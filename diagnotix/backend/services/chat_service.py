@@ -2,11 +2,33 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
+from dotenv import load_dotenv
 from openai import OpenAI
 
 from backend.models.schemas import ChatRequest
+
+# Load repo root .env (three levels up from diagnotix/backend/services/)
+load_dotenv(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")),
+    override=False,
+)
+
+# ── Vector DB (RAG) setup ────────────────────────────────────────────────────
+_VECTOR_DB_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "knowledge-graphs", "vector_db")
+)
+if _VECTOR_DB_DIR not in sys.path:
+    sys.path.insert(0, _VECTOR_DB_DIR)
+
+try:
+    from build_vector_db import query_guidelines as _query_guidelines  # noqa: E402
+    _RAG_AVAILABLE = True
+except Exception:
+    _RAG_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -16,18 +38,24 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 You are a clinical reasoning assistant working alongside emergency department \
 clinicians — triage nurses and emergency physicians. You have access to a \
 structured knowledge graph encoding triage rules, diagnostic pathways, and \
-evidence weights derived from published guidelines and medical literature.
+evidence weights derived from published guidelines and medical literature. \
+You also have direct access to retrieved passages from a curated corpus of \
+authoritative medical guidelines (AHA/ACC, ACR, NICE, ESC, ACEP, and others).
 
 When responding, open with a brief, direct orientation to what the knowledge \
 graph shows on the topic: the key relationships, notable co-occurrence counts \
 or trial numbers, and what they imply. Keep this grounding tight — a few \
 sentences at most, not a data dump. Then move into synthesis: bring your \
 broader clinical knowledge to bear, reason through the presentation, and let \
-the graph evidence surface naturally where it strengthens the argument. The \
-goal is a response that reads like a knowledgeable colleague thinking aloud, \
-not a structured report citing sources. Quantitative evidence from the graph \
-(article counts, trial numbers, guideline sources) should feel like supporting \
-colour, not scaffolding.
+the graph evidence surface naturally where it strengthens the argument.
+
+Where the retrieved guideline passages support a specific claim, cite them \
+inline using their bracket number — e.g. "per NICE guidance [2]" or \
+"ACC/AHA recommend [1]". Do not quote passages at length; paraphrase or \
+summarise the relevant point. At the end of your response, include a compact \
+**References** section listing only the passages you actually cited, in the \
+format: `[N] Source — Title`. Omit passages you did not use. If no passages \
+were relevant, omit the References section entirely.
 
 Use standard emergency medicine terminology and assume clinical fluency in your \
 reader. Be concise. For lists of findings, differentials, or actions, use \
@@ -41,7 +69,38 @@ without any "Type:" prefix.
 ## Current Knowledge Graph Context
 
 {kg_context}
+
+{rag_section}\
 """
+
+# ---------------------------------------------------------------------------
+# RAG retrieval
+# ---------------------------------------------------------------------------
+
+def _retrieve_rag_section(query: str, n_results: int = 4) -> str:
+    """Query the Qdrant vector DB and return a formatted guideline-passages block.
+
+    Uses the user's message as the semantic query with no test filter — results
+    span all indexed guidelines so the chat is not restricted to the 5 tagged tests.
+    Returns an empty string when the vector DB is unavailable.
+    """
+    if not _RAG_AVAILABLE:
+        return ""
+    try:
+        hits = _query_guidelines(query, n_results=n_results)
+        if not hits:
+            return ""
+
+        lines = ["## Retrieved Guideline Passages\n"]
+        for i, h in enumerate(hits, 1):
+            lines.append(
+                f"[{i}] {h['source']} — {h['title']}\n"
+                f"{h['context']}\n"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # KG serialisation
@@ -122,7 +181,11 @@ def sync_chat(req: ChatRequest) -> str:
         raise ValueError("NEBIUS_API_KEY not set")
 
     kg_context = _serialize_kg(req.context.nodes, req.context.edges, req.context.pathway)
-    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(kg_context=kg_context)
+    rag_section = _retrieve_rag_section(req.message)
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
+        kg_context=kg_context,
+        rag_section=rag_section,
+    )
 
     client = OpenAI(
         base_url="https://api.tokenfactory.us-central1.nebius.com/v1/",
