@@ -52,6 +52,54 @@ except Exception:
     _RAG_AVAILABLE = False
 
 _RULES_FILE = os.path.join(_KG_DIR, "guideline_rules.json")
+_BASE_PKL     = os.path.join(_KG_DIR, "triage_knowledge_graph.pkl")
+_ENRICHED_PKL = os.path.join(_KG_DIR, "triage_knowledge_graph_enriched.pkl")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PKL merge — keeps the enriched graph in sync after each rebuild
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _merge_base_into_enriched() -> None:
+    """Copy nodes/edges that exist in the base PKL but not in the enriched PKL.
+
+    build_kg.py always writes triage_knowledge_graph.pkl (base).
+    graph_service.py always reads triage_knowledge_graph_enriched.pkl.
+    This function bridges the gap so new LLM-generated nodes become visible
+    without losing enrichment metadata (trial counts, LOINC codes, etc.) on
+    nodes that were already in the enriched graph.
+    """
+    import pickle
+
+    if not os.path.exists(_BASE_PKL):
+        return
+
+    with open(_BASE_PKL, "rb") as f:
+        base = pickle.load(f)
+
+    if not os.path.exists(_ENRICHED_PKL):
+        # No enriched PKL yet — just copy base across
+        with open(_ENRICHED_PKL, "wb") as f:
+            pickle.dump(base, f)
+        print("  [merge] Enriched PKL did not exist — created from base PKL.")
+        return
+
+    with open(_ENRICHED_PKL, "rb") as f:
+        enriched = pickle.load(f)
+
+    new_nodes = [n for n in base.nodes() if n not in enriched]
+    for n in new_nodes:
+        enriched.add_node(n, **base.nodes[n])
+
+    new_edges = [(u, v) for u, v, _ in base.edges(data=True) if not enriched.has_edge(u, v)]
+    for u, v in new_edges:
+        enriched.add_edge(u, v, **base.edges[u, v])
+
+    with open(_ENRICHED_PKL, "wb") as f:
+        pickle.dump(enriched, f)
+
+    print(f"  [merge] Synced enriched PKL — "
+          f"+{len(new_nodes)} node(s), +{len(new_edges)} edge(s).")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RAG helper — retrieves grounding passages from the Qdrant vector DB
@@ -65,11 +113,16 @@ def _retrieve_rag_context(diagnostic_test: str, n_results: int = 5) -> str:
     gracefully to LLM training knowledge.
     """
     if not _RAG_AVAILABLE:
+        print("  [rag] Vector DB unavailable — skipping RAG retrieval.")
         return ""
     try:
         hits = _query_guidelines(diagnostic_test, n_results=n_results)
         if not hits:
+            print("  [rag] No results returned from vector DB.")
             return ""
+        print(f"  [rag] Retrieved {len(hits)} guideline passage(s) for '{diagnostic_test}':")
+        for i, h in enumerate(hits, 1):
+            print(f"    [{i}] score={h['score']:.4f}  source={h['source']}  title={h['title'][:80]}")
         lines = ["[GUIDELINE PASSAGES — retrieved from filtered medical guidelines corpus]"]
         for i, h in enumerate(hits, 1):
             lines.append(
@@ -79,7 +132,8 @@ def _retrieve_rag_context(diagnostic_test: str, n_results: int = 5) -> str:
             )
         lines.append("[/GUIDELINE PASSAGES]")
         return "\n".join(lines)
-    except Exception:
+    except Exception as e:
+        print(f"  [rag] Retrieval failed ({e}) — skipping.")
         return ""
 
 
@@ -560,8 +614,9 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
     with open(_RULES_FILE, "w") as f:
         json.dump(existing, f, indent=2)
 
-    # ── 6. Rebuild graph ─────────────────────────────────────────────────────
+    # ── 6. Rebuild graph then sync enriched PKL ──────────────────────────────
     stats = generate_knowledge_graph()
+    _merge_base_into_enriched()
 
     # ── 7. Compute diff ──────────────────────────────────────────────────────
     full_graph = load_graph_json()
