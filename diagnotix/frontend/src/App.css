@@ -780,6 +780,81 @@ html, body, #root {
   padding: 4px 0;
 }
 
+/* ─── Analyze accordion ─────────────────────────────────────────────────────── */
+.pathway-accordion {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: hidden;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.accordion-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.accordion-item.expanded {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 280px;
+}
+
+.accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: var(--surface-raised);
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 8px 10px;
+  text-align: left;
+  transition: background var(--transition), color var(--transition);
+}
+
+.accordion-header:hover,
+.accordion-item.expanded .accordion-header {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.accordion-arrow {
+  font-size: 9px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.accordion-label {
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.accordion-badge {
+  background: var(--blue-dim);
+  border: 1px solid var(--blue);
+  border-radius: 100px;
+  color: var(--blue);
+  font-size: 10px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.accordion-item.expanded .chat-panel {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .sidebar { display: none; }

@@ -12,6 +12,8 @@ import {
 
 interface Props {
   context: ChatContext;
+  messages: ChatMessage[];
+  onMessagesChange: (msgs: ChatMessage[]) => void;
   onHoverNode: (nodeId: string | null) => void;
 }
 
@@ -122,6 +124,7 @@ function makeComponents(
   return {
     p:  ({ children }) => <p><Enrich>{children}</Enrich></p>,
     li: ({ children }) => <li><Enrich>{children}</Enrich></li>,
+    a:  ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
   };
 }
 
@@ -144,8 +147,7 @@ function MarkdownMessage({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ChatBot({ context, onHoverNode }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export default function ChatBot({ context, messages, onMessagesChange, onHoverNode }: Props) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,14 +166,15 @@ export default function ChatBot({ context, onHoverNode }: Props) {
     if (!trimmed || loading) return;
 
     const userMsg: ChatMessage = { role: "user", content: trimmed };
-    setMessages((prev) => [...prev, userMsg]);
+    const withUser = [...messages, userMsg];
+    onMessagesChange(withUser);
     setInput("");
     setError(null);
     setLoading(true);
 
     try {
       const res = await sendChatMessage(trimmed, messages, context);
-      setMessages((prev) => [...prev, { role: "assistant", content: res.content }]);
+      onMessagesChange([...withUser, { role: "assistant", content: res.content }]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -179,16 +182,8 @@ export default function ChatBot({ context, onHoverNode }: Props) {
     }
   }
 
-  const pathwayLabel = context.pathway ?? "All Pathways";
-
   return (
     <div className="chat-panel">
-      {/* Context badge */}
-      <div className="chat-context-badge">
-        <span className="chat-context-dot" />
-        {pathwayLabel}
-      </div>
-
       {/* Message history */}
       <div className="chat-messages" ref={scrollRef}>
         {messages.length === 0 && (

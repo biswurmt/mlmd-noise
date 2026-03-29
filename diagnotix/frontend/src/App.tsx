@@ -4,9 +4,11 @@ import ChatBot from "./components/ChatBot";
 import ChatInput from "./components/ChatInput";
 import GraphCanvas from "./components/GraphCanvas";
 import { DEFAULT_NODE_COLOR, NODE_COLORS } from "./constants/nodeColors";
-import { addTest, getGraph, getTests, type ChatContext, type GraphEdge, type GraphNode, type TestNode } from "./services/api";
+import { addTest, getGraph, getTests, type ChatContext, type ChatMessage, type GraphEdge, type GraphNode, type TestNode } from "./services/api";
 
 const DEFAULT_PATHWAY = "Abdominal Ultrasound";
+
+const pathwayKey = (id: string | null): string => id ?? "__all__";
 
 // Node types visible on initial load. All others start hidden.
 const DEFAULT_VISIBLE_TYPES = new Set(["Symptom", "Condition", "Diagnostic_Test"]);
@@ -28,8 +30,11 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [chatMode, setChatMode] = useState(false);
-  const [chatContext, setChatContext] = useState<ChatContext | null>(null);
   const [chatHoveredNodeId, setChatHoveredNodeId] = useState<string | null>(null);
+  const [visitedPathways, setVisitedPathways] = useState<string[]>([]);
+  const [pathwayContexts, setPathwayContexts] = useState<Map<string, ChatContext>>(new Map());
+  const [pathwayHistories, setPathwayHistories] = useState<Map<string, ChatMessage[]>>(new Map());
+  const [expandedPathway, setExpandedPathway] = useState<string | null>(null);
 
   // ── Load sidebar test list on mount ───────────────────────────────────────
   useEffect(() => {
@@ -44,6 +49,14 @@ export default function App() {
       .then((data) => {
         setNodes(data.nodes);
         setEdges(data.edges);
+        const key = pathwayKey(selectedTest);
+        const ctx: ChatContext = {
+          nodes: data.nodes,
+          edges: data.edges,
+          pathway: selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : null,
+        };
+        setPathwayContexts((prev) => new Map(prev).set(key, ctx));
+        setVisitedPathways((prev) => prev.includes(key) ? prev : [...prev, key]);
       })
       .catch(console.error)
       .finally(() => setGraphLoading(false));
@@ -194,23 +207,55 @@ export default function App() {
             <button
               className={`mode-btn${chatMode ? " active" : ""}`}
               onClick={() => {
-                setChatContext({
-                  nodes: focusedNodes ?? visibleNodes,
-                  edges: focusedEdges ?? visibleEdges,
-                  pathway: selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : null,
-                });
                 setChatMode(true);
+                setExpandedPathway(pathwayKey(selectedTest));
               }}
             >
               Analyze
             </button>
           </div>
 
-          {chatMode && chatContext ? (
-            <ChatBot
-              context={chatContext}
-              onHoverNode={setChatHoveredNodeId}
-            />
+          {chatMode ? (
+            <div className="pathway-accordion">
+              {visitedPathways.length === 0 ? (
+                <p className="chat-empty-hint">
+                  Select a pathway in Navigate to start a conversation.
+                </p>
+              ) : (
+                visitedPathways.map((key) => {
+                  const label = key === "__all__"
+                    ? "All Pathways"
+                    : key.replace(/^[^:]+:\s*/, "");
+                  const isExpanded = expandedPathway === key;
+                  const ctx = pathwayContexts.get(key);
+                  const msgs = pathwayHistories.get(key) ?? [];
+                  return (
+                    <div key={key} className={`accordion-item${isExpanded ? " expanded" : ""}`}>
+                      <button
+                        className="accordion-header"
+                        onClick={() => setExpandedPathway(isExpanded ? null : key)}
+                      >
+                        <span className="accordion-arrow">{isExpanded ? "▼" : "►"}</span>
+                        <span className="accordion-label">{label}</span>
+                        {msgs.length > 0 && (
+                          <span className="accordion-badge">{Math.ceil(msgs.length / 2)}</span>
+                        )}
+                      </button>
+                      {isExpanded && ctx && (
+                        <ChatBot
+                          context={ctx}
+                          messages={msgs}
+                          onMessagesChange={(next) =>
+                            setPathwayHistories((prev) => new Map(prev).set(key, next))
+                          }
+                          onHoverNode={setChatHoveredNodeId}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           ) : (
             <>
               {/* ── Node search ── */}

@@ -28,6 +28,12 @@ load_dotenv(
 )
 
 from backend.models.schemas import AddTestResponse
+
+try:
+    from backend.services.semantic_scholar import search_papers as _ss_search, format_abstracts_section as _ss_format
+    _SS_AVAILABLE = True
+except Exception:
+    _SS_AVAILABLE = False
 from backend.services.graph_service import get_existing_node_ids, load_graph_json
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -503,6 +509,18 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
 
     # ── 2. LLM extraction ────────────────────────────────────────────────────
     rag_context = _retrieve_rag_context(diagnostic_test)
+
+    # Semantic Scholar abstracts for additional literature grounding
+    scholar_section = ""
+    if _SS_AVAILABLE:
+        try:
+            papers = _ss_search(f"{diagnostic_test} clinical diagnosis triage", limit=3)
+            scholar_section = _ss_format(papers, heading="Supporting Research Abstracts (Semantic Scholar)")
+            if scholar_section:
+                print(f"  [semantic_scholar] Injecting {len(papers)} abstract(s) into rule-generation prompt.")
+        except Exception as e:
+            print(f"  [semantic_scholar] Skipping abstracts: {e}")
+
     user_message = (
         f'Generate triage rules for the diagnostic test: "{diagnostic_test}"\n\n'
         f"The system already encodes rules from AHA/ACC, CTAS, ACR, and NICE. "
@@ -514,6 +532,7 @@ def _sync_add_test(diagnostic_test: str) -> AddTestResponse:
         f"a mix of node types (Symptom, Vital_Sign_Threshold, Risk_Factor, etc.).\n\n"
         f'IMPORTANT: the "test" field must be exactly "{diagnostic_test}" for every rule.'
         + (f"\n\n{rag_context}" if rag_context else "")
+        + (f"\n\n{scholar_section}" if scholar_section else "")
     )
 
     # Attach Bing Search grounding when a key is configured so the model can
