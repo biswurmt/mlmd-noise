@@ -293,3 +293,4 @@ CLAUDE.md
 
 # Git worktrees (local parallel workspaces, never committed)
 .worktrees/
+*.pptx
