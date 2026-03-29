@@ -1,4 +1,7 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import React, { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { DEFAULT_NODE_COLOR, NODE_COLORS } from "../constants/nodeColors";
 import {
   type ChatContext,
@@ -58,9 +61,65 @@ function enrichText(text: string, index: NodeEntry[]): Segment[] {
     });
 }
 
-// ── Enriched message renderer ─────────────────────────────────────────────────
+// ── Enriched markdown renderer ────────────────────────────────────────────────
 
-function EnrichedText({
+/** Enrich a single string child: split on node labels → chips + plain text. */
+function enrichString(
+  str: string,
+  index: NodeEntry[],
+  onHoverNode: (id: string | null) => void,
+  keyPrefix: string,
+) {
+  return enrichText(str, index).map((seg, i) => {
+    if (seg.kind === "text") return <span key={`${keyPrefix}-${i}`}>{seg.value}</span>;
+    const color = NODE_COLORS[seg.type] ?? DEFAULT_NODE_COLOR;
+    return (
+      <span
+        key={`${keyPrefix}-${i}`}
+        className="chat-node-chip"
+        style={{ borderColor: color, color }}
+        onMouseEnter={() => onHoverNode(seg.nodeId)}
+        onMouseLeave={() => onHoverNode(null)}
+      >
+        {seg.label}
+      </span>
+    );
+  });
+}
+
+/** Recursively enrich React children: strings get chipified, elements pass through. */
+function enrichChildren(
+  children: React.ReactNode,
+  index: NodeEntry[],
+  onHoverNode: (id: string | null) => void,
+  depth = 0,
+): React.ReactNode {
+  return (Array.isArray(children) ? children : [children]).flatMap((child, i) => {
+    if (typeof child === "string") return enrichString(child, index, onHoverNode, `d${depth}-${i}`);
+    if (child && typeof child === "object" && "props" in (child as object)) {
+      const el = child as React.ReactElement<{ children?: React.ReactNode }>;
+      return React.cloneElement(el, {}, enrichChildren(el.props.children, index, onHoverNode, depth + 1));
+    }
+    return child;
+  });
+}
+
+function makeComponents(
+  index: NodeEntry[],
+  onHoverNode: (id: string | null) => void,
+): Components {
+  function Enrich({ children }: { children?: React.ReactNode }) {
+    return <>{enrichChildren(children, index, onHoverNode)}</>;
+  }
+  return {
+    p:      ({ children }) => <p><Enrich>{children}</Enrich></p>,
+    li:     ({ children }) => <li><Enrich>{children}</Enrich></li>,
+    strong: ({ children }) => <strong><Enrich>{children}</Enrich></strong>,
+    em:     ({ children }) => <em><Enrich>{children}</Enrich></em>,
+  };
+}
+
+function MarkdownMessage({
   text,
   index,
   onHoverNode,
@@ -69,26 +128,11 @@ function EnrichedText({
   index: NodeEntry[];
   onHoverNode: (id: string | null) => void;
 }) {
-  const segments = useMemo(() => enrichText(text, index), [text, index]);
-
+  const components = useMemo(() => makeComponents(index, onHoverNode), [index, onHoverNode]);
   return (
-    <>
-      {segments.map((seg, i) => {
-        if (seg.kind === "text") return <span key={i}>{seg.value}</span>;
-        const color = NODE_COLORS[seg.type] ?? DEFAULT_NODE_COLOR;
-        return (
-          <span
-            key={i}
-            className="chat-node-chip"
-            style={{ borderColor: color, color }}
-            onMouseEnter={() => onHoverNode(seg.nodeId)}
-            onMouseLeave={() => onHoverNode(null)}
-          >
-            {seg.label}
-          </span>
-        );
-      })}
-    </>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {text}
+    </ReactMarkdown>
   );
 }
 
@@ -149,7 +193,7 @@ export default function ChatBot({ context, onHoverNode }: Props) {
         {messages.map((msg, i) => (
           <div key={i} className={`chat-msg chat-msg-${msg.role}`}>
             {msg.role === "assistant" ? (
-              <EnrichedText text={msg.content} index={nodeIndex} onHoverNode={onHoverNode} />
+              <MarkdownMessage text={msg.content} index={nodeIndex} onHoverNode={onHoverNode} />
             ) : (
               msg.content
             )}

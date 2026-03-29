@@ -320,19 +320,15 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway, h
       const isChatHover  = highlightedNodeId === node.id;
       const typ    = node.node_type ?? node.type ?? "";
       const fill   = isNew ? NEW_HIGHLIGHT_COLOR : (NODE_COLORS[typ] ?? DEFAULT_NODE_COLOR);
-      const radius = isNew ? 9 : (isHovered || isChatHover) ? 8 : 6;
+      const radius = isNew ? 9 : isHovered ? 8 : 6;   // chat hover no longer scales
       const nx     = node.x ?? 0;
       const ny     = node.y ?? 0;
 
-      // ── 1. Glow ring ────────────────────────────────────────────────────────
-      if (isNew || isHovered || isChatHover) {
+      // ── 1. Glow ring (new nodes or mouse-hovered only) ──────────────────────
+      if (isNew || isHovered) {
         ctx.beginPath();
         ctx.arc(nx, ny, radius + 5, 0, 2 * Math.PI);
-        ctx.fillStyle = isNew
-          ? "rgba(255,255,255,0.12)"
-          : isChatHover
-          ? "rgba(56,139,253,0.18)"  // blue tint for chat hover
-          : "rgba(255,255,255,0.08)";
+        ctx.fillStyle = isNew ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.08)";
         ctx.fill();
       }
 
@@ -343,10 +339,12 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway, h
       ctx.fill();
       ctx.strokeStyle =
         isNew || isHovered ? "#ffffff" :
-        isChatHover        ? "#58a6ff" :  // blue ring for chat hover
+        isChatHover        ? "#58a6ff" :  // thin blue ring, no size change
         "rgba(255,255,255,0.25)";
       ctx.lineWidth =
-        isNew || isHovered || isChatHover ? 1.5 : 0.8 / globalScale;
+        isChatHover ? 1.5 / globalScale :
+        isNew || isHovered ? 1.5 :
+        0.8 / globalScale;
       ctx.stroke();
 
       // ── 3. Text label below node ────────────────────────────────────────────
