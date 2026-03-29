@@ -176,11 +176,6 @@ export default function App() {
             <span className="brand-tagline">Medical Knowledge Graph Builder</span>
           </div>
         </div>
-        <div className="header-stats">
-          <span className="stat-pill">{nodes.length} nodes</span>
-          <span className="stat-pill">{edges.length} edges</span>
-          {loading && <span className="stat-pill loading-pill">Processing…</span>}
-        </div>
       </header>
 
       {/* ── Body ── */}
@@ -338,6 +333,10 @@ export default function App() {
                   <div className="spinner" />
                 </div>
               )}
+              <div className="canvas-meta">
+                {nodes.length} nodes · {edges.length} edges
+                {loading && <span className="canvas-meta-loading"> · processing…</span>}
+              </div>
             </div>
           )}
         </main>

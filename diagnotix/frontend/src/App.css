@@ -105,31 +105,8 @@ html, body, #root {
   letter-spacing: 0.2px;
 }
 
-.header-stats {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.stat-pill {
-  font-size: 11px;
-  font-weight: 500;
-  background: var(--border-subtle);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  padding: 3px 9px;
-  border-radius: 100px;
-}
-
-.loading-pill {
-  background: var(--blue-dim);
-  border-color: var(--blue);
-  color: var(--blue-hover);
-  animation: pulse-text 1.2s ease-in-out infinite;
-}
-
 @keyframes pulse-text {
-  0%, 100% { opacity: 0.6; }
+  0%, 100% { opacity: 0.5; }
   50%       { opacity: 1; }
 }
 
@@ -309,6 +286,21 @@ html, body, #root {
   font-size: 13px;
   text-align: center;
   padding: 40px;
+}
+
+.canvas-meta {
+  position: absolute;
+  bottom: 14px;
+  right: 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  pointer-events: none;
+  user-select: none;
+  letter-spacing: 0.2px;
+}
+
+.canvas-meta-loading {
+  animation: pulse-text 1.2s ease-in-out infinite;
 }
 
 .canvas-loading-overlay {
@@ -791,5 +783,4 @@ html, body, #root {
 /* ─── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .sidebar { display: none; }
-  .header-stats { display: none; }
 }

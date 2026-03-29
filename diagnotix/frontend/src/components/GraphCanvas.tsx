@@ -339,11 +339,11 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway, h
       ctx.fill();
       ctx.strokeStyle =
         isNew || isHovered ? "#ffffff" :
-        isChatHover        ? "#58a6ff" :  // thin blue ring, no size change
+        isChatHover        ? "rgba(255,255,255,0.75)" :
         "rgba(255,255,255,0.25)";
       ctx.lineWidth =
-        isChatHover ? 1.5 / globalScale :
         isNew || isHovered ? 1.5 :
+        isChatHover        ? 2.5 :
         0.8 / globalScale;
       ctx.stroke();
 

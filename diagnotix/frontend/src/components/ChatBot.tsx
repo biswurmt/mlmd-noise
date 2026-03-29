@@ -112,10 +112,8 @@ function makeComponents(
     return <>{enrichChildren(children, index, onHoverNode)}</>;
   }
   return {
-    p:      ({ children }) => <p><Enrich>{children}</Enrich></p>,
-    li:     ({ children }) => <li><Enrich>{children}</Enrich></li>,
-    strong: ({ children }) => <strong><Enrich>{children}</Enrich></strong>,
-    em:     ({ children }) => <em><Enrich>{children}</Enrich></em>,
+    p:  ({ children }) => <p><Enrich>{children}</Enrich></p>,
+    li: ({ children }) => <li><Enrich>{children}</Enrich></li>,
   };
 }
 
