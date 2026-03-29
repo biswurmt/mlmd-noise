@@ -182,6 +182,7 @@ def sync_chat(req: ChatRequest) -> str:
 
     kg_context = _serialize_kg(req.context.nodes, req.context.edges, req.context.pathway)
     rag_section = _retrieve_rag_section(req.message)
+    print("[rag] raw section:\n", rag_section or "<empty>")
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
         kg_context=kg_context,
         rag_section=rag_section,
