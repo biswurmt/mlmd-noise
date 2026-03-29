@@ -46,10 +46,11 @@ interface FGLink extends Record<string, unknown> {
 }
 
 interface Props {
-  nodes:          GraphNode[];
-  edges:          GraphEdge[];
-  newNodeIds:     Set<string>;
-  activePathway?: string | null;
+  nodes:               GraphNode[];
+  edges:               GraphEdge[];
+  newNodeIds:          Set<string>;
+  activePathway?:      string | null;
+  highlightedNodeId?:  string | null;
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -214,7 +215,7 @@ function NodeTooltip({ node, activePathway }: { node: FGNode; activePathway?: st
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway }: Props) {
+export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway, highlightedNodeId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef        = useRef<ForceGraphMethods<FGNode, FGLink>>();
   const [dims, setDims]               = useState({ width: 800, height: 600 });
@@ -318,15 +319,16 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway }:
   // ── Node painter ─────────────────────────────────────────────────────────────
   const paintNode = useCallback(
     (node: FGNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      const isNew  = highlightIds.has(node.id);
-      const isHovered = hoveredNode?.id === node.id;
+      const isNew        = highlightIds.has(node.id);
+      const isHovered    = hoveredNode?.id === node.id;
+      const isChatHover  = highlightedNodeId === node.id;
       const typ    = node.node_type ?? node.type ?? "";
       const fill   = isNew ? NEW_HIGHLIGHT_COLOR : (NODE_COLORS[typ] ?? DEFAULT_NODE_COLOR);
-      const radius = isNew ? 9 : isHovered ? 8 : 6;
+      const radius = isNew ? 9 : isHovered ? 8 : 6;   // chat hover no longer scales
       const nx     = node.x ?? 0;
       const ny     = node.y ?? 0;
 
-      // ── 1. Glow ring (new nodes or hovered) ────────────────────────────────
+      // ── 1. Glow ring (new nodes or mouse-hovered only) ──────────────────────
       if (isNew || isHovered) {
         ctx.beginPath();
         ctx.arc(nx, ny, radius + 5, 0, 2 * Math.PI);
@@ -339,8 +341,14 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway }:
       ctx.arc(nx, ny, radius, 0, 2 * Math.PI);
       ctx.fillStyle = fill;
       ctx.fill();
-      ctx.strokeStyle = isNew || isHovered ? "#ffffff" : "rgba(255,255,255,0.25)";
-      ctx.lineWidth   = isNew || isHovered ? 1.5 : 0.8 / globalScale;
+      ctx.strokeStyle =
+        isNew || isHovered ? "#ffffff" :
+        isChatHover        ? "rgba(255,255,255,0.75)" :
+        "rgba(255,255,255,0.25)";
+      ctx.lineWidth =
+        isNew || isHovered ? 1.5 :
+        isChatHover        ? 2.5 :
+        0.8 / globalScale;
       ctx.stroke();
 
       // ── 3. Text label below node ────────────────────────────────────────────
@@ -354,7 +362,7 @@ export default function GraphCanvas({ nodes, edges, newNodeIds, activePathway }:
         ctx.fillText(label, nx, ny + radius + 2 / globalScale);
       }
     },
-    [highlightIds, hoveredNode]
+    [highlightIds, hoveredNode, highlightedNodeId]
   );
 
   // Hit-test area

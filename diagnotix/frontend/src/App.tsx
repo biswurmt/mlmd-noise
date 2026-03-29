@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import ChatBot from "./components/ChatBot";
 import ChatInput from "./components/ChatInput";
 import GraphCanvas from "./components/GraphCanvas";
-import { NODE_COLORS } from "./constants/nodeColors";
-import { addTest, getGraph, getTests, type GraphEdge, type GraphNode, type TestNode } from "./services/api";
+import { DEFAULT_NODE_COLOR, NODE_COLORS } from "./constants/nodeColors";
+import { addTest, getGraph, getTests, type ChatContext, type GraphEdge, type GraphNode, type TestNode } from "./services/api";
 
 const DEFAULT_PATHWAY = "Abdominal Ultrasound";
 
@@ -24,6 +25,11 @@ export default function App() {
   const [selectedTest, setSelectedTest] = useState<string | null>(`Test: ${DEFAULT_PATHWAY}`);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [chatMode, setChatMode] = useState(false);
+  const [chatContext, setChatContext] = useState<ChatContext | null>(null);
+  const [chatHoveredNodeId, setChatHoveredNodeId] = useState<string | null>(null);
 
   // ── Load sidebar test list on mount ───────────────────────────────────────
   useEffect(() => {
@@ -119,6 +125,38 @@ export default function App() {
     [edges, visibleNodeIds]
   );
 
+  // ── Search results ─────────────────────────────────────────────────────────
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return nodes.filter((n) => {
+      const label = n.id.replace(/^[^:]+:\s*/, "").toLowerCase();
+      return label.includes(q);
+    });
+  }, [nodes, searchQuery]);
+
+  // ── Focused 1-hop subgraph (client-side) ──────────────────────────────────
+  const focusedNodes = useMemo(() => {
+    if (!focusedNodeId) return null;
+    const neighborIds = new Set<string>([focusedNodeId]);
+    edges.forEach((e) => {
+      const src = typeof e.source === "string" ? e.source : (e.source as any).id;
+      const tgt = typeof e.target === "string" ? e.target : (e.target as any).id;
+      if (src === focusedNodeId) neighborIds.add(tgt);
+      if (tgt === focusedNodeId) neighborIds.add(src);
+    });
+    return nodes.filter((n) => neighborIds.has(n.id));
+  }, [focusedNodeId, nodes, edges]);
+
+  const focusedEdges = useMemo(() => {
+    if (!focusedNodeId) return null;
+    return edges.filter((e) => {
+      const src = typeof e.source === "string" ? e.source : (e.source as any).id;
+      const tgt = typeof e.target === "string" ? e.target : (e.target as any).id;
+      return src === focusedNodeId || tgt === focusedNodeId;
+    });
+  }, [focusedNodeId, edges]);
+
   // ── Node-type counts for legend (always from full unfiltered set) ──────────
   const typeCounts = nodes.reduce<Record<string, number>>((acc, n) => {
     const t = (n.node_type as string | undefined) ?? "Unknown";
@@ -138,82 +176,137 @@ export default function App() {
             <span className="brand-tagline">Medical Knowledge Graph Builder</span>
           </div>
         </div>
-        <div className="header-stats">
-          <span className="stat-pill">{nodes.length} nodes</span>
-          <span className="stat-pill">{edges.length} edges</span>
-          {loading && <span className="stat-pill loading-pill">Processing…</span>}
-        </div>
       </header>
 
       {/* ── Body ── */}
       <div className="body">
         {/* Sidebar */}
-        <aside className="sidebar">
+        <aside className={`sidebar${chatMode ? " sidebar--analyze" : ""}`}>
 
-          {/* ── Pathway picker ── */}
-          {allTestNodes.length > 0 && (
+          {/* ── Mode toggle ── */}
+          <div className="sidebar-mode-toggle">
+            <button
+              className={`mode-btn${!chatMode ? " active" : ""}`}
+              onClick={() => { setChatMode(false); setChatHoveredNodeId(null); }}
+            >
+              Navigate
+            </button>
+            <button
+              className={`mode-btn${chatMode ? " active" : ""}`}
+              onClick={() => {
+                setChatContext({
+                  nodes: focusedNodes ?? visibleNodes,
+                  edges: focusedEdges ?? visibleEdges,
+                  pathway: selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : null,
+                });
+                setChatMode(true);
+              }}
+            >
+              Analyze
+            </button>
+          </div>
+
+          {chatMode && chatContext ? (
+            <ChatBot
+              context={chatContext}
+              onHoverNode={setChatHoveredNodeId}
+            />
+          ) : (
             <>
-              <p className="sidebar-title">Pathways</p>
-              <div className="pathway-list">
-                <button
-                  className={`pathway-btn${selectedTest === null ? " active" : ""}`}
-                  onClick={() => setSelectedTest(null)}
-                >
-                  All Pathways
-                  <span className="pathway-count">{allTestNodes.length}</span>
-                </button>
-                {allTestNodes.map(({ id, label }) => (
-                  <button
-                    key={id}
-                    className={`pathway-btn${selectedTest === id ? " active" : ""}`}
-                    onClick={() => setSelectedTest(selectedTest === id ? null : id)}
-                  >
-                    {label}
-                  </button>
-                ))}
+              {/* ── Node search ── */}
+              <p className="sidebar-title">Search</p>
+              <div className="search-section">
+                <input
+                  className="node-search-input"
+                  type="text"
+                  placeholder="Search nodes…"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setFocusedNodeId(null);
+                  }}
+                />
+                {searchQuery.trim() && (
+                  <div className="search-results">
+                    {searchResults.length === 0 ? (
+                      <p className="search-no-results">No nodes found</p>
+                    ) : (
+                      searchResults.map((n) => {
+                        const label = n.id.replace(/^[^:]+:\s*/, "");
+                        const color = NODE_COLORS[n.node_type ?? ""] ?? DEFAULT_NODE_COLOR;
+                        return (
+                          <button
+                            key={n.id}
+                            className={`search-result-btn${focusedNodeId === n.id ? " active" : ""}`}
+                            onClick={() => setFocusedNodeId(focusedNodeId === n.id ? null : n.id)}
+                          >
+                            <span className="search-result-dot" style={{ background: color }} />
+                            {label}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
               <div className="sidebar-divider" />
+
+              {/* ── Node type legend ── */}
+              <p className="sidebar-title">Node Types</p>
+              <ul className="legend">
+                {Object.entries(NODE_COLORS).map(([type, color]) => {
+                  const hidden = hiddenTypes.has(type);
+                  return (
+                    <li
+                      key={type}
+                      className={`legend-item${hidden ? " legend-item--hidden" : ""}`}
+                      onClick={() => toggleType(type)}
+                      title={hidden ? `Show ${type.replace(/_/g, " ")}` : `Hide ${type.replace(/_/g, " ")}`}
+                    >
+                      <span
+                        className="legend-dot"
+                        style={{ background: hidden ? "var(--border)" : color }}
+                      />
+                      <span className="legend-label">{type.replace(/_/g, " ")}</span>
+                      <span className="legend-count">{typeCounts[type] ?? 0}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {/* ── Pathway picker ── */}
+              {allTestNodes.length > 0 && (
+                <>
+                  <div className="sidebar-divider" />
+                  <p className="sidebar-title">Pathways</p>
+                  <div className="pathway-list">
+                    <button
+                      className={`pathway-btn${selectedTest === null ? " active" : ""}`}
+                      onClick={() => setSelectedTest(null)}
+                    >
+                      All Pathways
+                      <span className="pathway-count">{allTestNodes.length}</span>
+                    </button>
+                    {allTestNodes.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        className={`pathway-btn${selectedTest === id ? " active" : ""}`}
+                        onClick={() => setSelectedTest(selectedTest === id ? null : id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="sidebar-divider" />
+
+              {/* ── Add pathway ── */}
+              <p className="sidebar-title">Add Pathway</p>
+              <ChatInput onSubmit={handleAddTest} disabled={loading} />
             </>
           )}
-
-          {/* ── Node type legend ── */}
-          <p className="sidebar-title">Node Types</p>
-          <ul className="legend">
-            {Object.entries(NODE_COLORS).map(([type, color]) => {
-              const hidden = hiddenTypes.has(type);
-              return (
-                <li
-                  key={type}
-                  className={`legend-item${hidden ? " legend-item--hidden" : ""}`}
-                  onClick={() => toggleType(type)}
-                  title={hidden ? `Show ${type.replace(/_/g, " ")}` : `Hide ${type.replace(/_/g, " ")}`}
-                >
-                  <span
-                    className="legend-dot"
-                    style={{ background: hidden ? "var(--border)" : color }}
-                  />
-                  <span className="legend-label">{type.replace(/_/g, " ")}</span>
-                  <span className="legend-count">{typeCounts[type] ?? 0}</span>
-                </li>
-              );
-            })}
-          </ul>
-
-          <div className="sidebar-divider" />
-
-          {/* ── Pipeline info ── */}
-          <p className="sidebar-title">Pipeline</p>
-          <ol className="pipeline-steps">
-            <li>Azure OpenAI extracts 8–15 triage rules</li>
-            <li>Schema validation (node type + guideline source)</li>
-            <li>
-              Multi-ontology grounding: conditions via ICD-10-CM (NLM), symptoms via HP/MONDO (EMBL-EBI OLS4), SNOMED CT (Infoway), evidence from Europe PMC
-            </li>
-            <li>LLM clinical review → regenerate dropped rules (up to 3× iterations)</li>
-            <li>Rules appended to guideline_rules.json</li>
-            <li>NetworkX graph rebuilt</li>
-            <li>New cluster appended live</li>
-          </ol>
         </aside>
 
         {/* Graph canvas */}
@@ -228,10 +321,11 @@ export default function App() {
             <div style={{ position: "relative", width: "100%", height: "100%" }}>
               {visibleNodes.length > 0 && (
                 <GraphCanvas
-                  nodes={visibleNodes}
-                  edges={visibleEdges}
+                  nodes={focusedNodes ?? visibleNodes}
+                  edges={focusedEdges ?? visibleEdges}
                   newNodeIds={newNodeIds}
                   activePathway={selectedTest ? selectedTest.replace(/^[^:]+:\s*/, "") : null}
+                  highlightedNodeId={chatHoveredNodeId}
                 />
               )}
               {graphLoading && (
@@ -239,13 +333,14 @@ export default function App() {
                   <div className="spinner" />
                 </div>
               )}
+              <div className="canvas-meta">
+                {nodes.length} nodes · {edges.length} edges
+                {loading && <span className="canvas-meta-loading"> · processing…</span>}
+              </div>
             </div>
           )}
         </main>
       </div>
-
-      {/* ── Chat bar ── */}
-      <ChatInput onSubmit={handleAddTest} disabled={loading} />
 
       {/* ── Toast ── */}
       {toast && (

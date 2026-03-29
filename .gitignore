@@ -290,3 +290,6 @@ CLAUDE.md
 
 # OS generated files
 .DS_Store
+
+# Git worktrees (local parallel workspaces, never committed)
+.worktrees/

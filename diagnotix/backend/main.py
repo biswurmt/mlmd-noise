@@ -1,8 +1,14 @@
 import logging
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Load credentials (ANTHROPIC_API_KEY, etc.) from knowledge-graphs/.env
+load_dotenv(Path(__file__).parent.parent.parent / "knowledge-graphs" / ".env")
+
+from backend.routers import chat as chat_router
 from backend.routers import graph as graph_router
 
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(graph_router.router, prefix="/api", tags=["knowledge-graph"])
+app.include_router(chat_router.router, prefix="/api", tags=["chat"])
 
 
 @app.get("/health")

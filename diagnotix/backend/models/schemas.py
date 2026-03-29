@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -32,3 +32,26 @@ class AddTestResponse(BaseModel):
     total_nodes: int
     total_edges: int
     message: str
+
+
+# ── Chat (POST /api/chat) ──────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatContext(BaseModel):
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+    pathway: Optional[str] = None
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: List[ChatMessage] = []
+    context: ChatContext
+
+
+class ChatResponse(BaseModel):
+    content: str
