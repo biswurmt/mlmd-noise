@@ -19,10 +19,18 @@ import os
 import pickle
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")),
+    override=False,
+)
+
 _KG_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "knowledge-graphs")
 )
-PKL_PATH = os.path.join(_KG_DIR, "triage_knowledge_graph_enriched.pkl")
+_pkl_file = os.environ.get("KG_PKL_FILE", "triage_knowledge_graph_enriched.pkl")
+PKL_PATH = os.path.join(_KG_DIR, _pkl_file)
 
 
 def _clean(v: Any) -> Any:
