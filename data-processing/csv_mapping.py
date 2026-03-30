@@ -1,11 +1,8 @@
 import argparse
 import os
-import json
 import pickle
 import pandas as pd
 import networkx as nx
-from azure.identity import AzureCliCredential, get_bearer_token_provider
-from openai import AzureOpenAI
 
 from dotenv import load_dotenv
 
@@ -18,25 +15,6 @@ env_path = os.path.abspath(os.path.join(current_dir, "..", "knowledge-graphs", "
 # 3. Load the file
 load_dotenv(env_path, override=True)
 load_dotenv(env_path)
-# ---------------------------------------------------------
-# 1. Setup Azure OpenAI Client
-# ---------------------------------------------------------
-_endpoint = os.environ.get("ENDPOINT_URL")
-_deployment = os.environ.get("DEPLOYMENT_NAME")
-
-if not _endpoint or not _deployment:
-    raise ValueError("ENDPOINT_URL or DEPLOYMENT_NAME missing from environment.")
-
-_credential = AzureCliCredential()
-_token_provider = get_bearer_token_provider(
-    _credential, "https://cognitiveservices.azure.com/.default"
-)
-
-_CLIENT = AzureOpenAI(
-    azure_endpoint=_endpoint,
-    azure_ad_token_provider=_token_provider,
-    api_version="2025-01-01-preview",
-)
 
 # Node-type prefix mapping (mirrors build_kg.py _NODE_PREFIX)
 _PREFIX_TO_TYPE = {
@@ -175,63 +153,7 @@ def _run_validation(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------
-# 3. Semantic Matching Function
-# ---------------------------------------------------------
-def get_semantic_matches(raw_diagnosis: str, available_nodes: list[dict]) -> list[dict]:
-    """Uses Azure OpenAI to return up to 3 high-confidence matches from the graph.
-
-    Each match is {"label": str, "node_type": str} where label is the node label
-    exactly as it appears in available_nodes.  Returns an empty list when no
-    reasonable match exists.
-    """
-    system_prompt = (
-        "You are a clinical NLP assistant mapping raw patient diagnoses to nodes in a "
-        "medical knowledge graph. A node can be a Condition (named diagnosis), Symptom "
-        "(clinical finding), Vital_Sign_Threshold, Risk_Factor, Demographic_Factor, "
-        "Clinical_Attribute, or Mechanism_of_Injury.\n\n"
-        "For each candidate node, estimate your confidence (0–100) that it is clinically "
-        "relevant to the raw diagnosis. Return ALL nodes where your confidence is 85 or "
-        "above. There is no cap on the number of matches — return one, many, or none "
-        "depending on how many genuinely meet the threshold. "
-        "If no node reaches 85% confidence, return an empty array.\n\n"
-        "Respond in strictly valid JSON: "
-        "{\"matches\": [{\"label\": \"...\", \"node_type\": \"...\", \"confidence\": <int 0-100>}, ...]}"
-    )
-
-    user_prompt = (
-        f"Raw Patient Diagnosis: '{raw_diagnosis}'\n\n"
-        f"Available Graph Nodes:\n{json.dumps(available_nodes, indent=2)}\n\n"
-        "Return each label exactly as it appears in the node list above. "
-        "Only include matches with confidence >= 85."
-    )
-
-    try:
-        response = _CLIENT.chat.completions.create(
-            model=_deployment,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-        )
-        result = json.loads(response.choices[0].message.content)
-        matches = result.get("matches", [])
-        if not isinstance(matches, list):
-            return []
-        return [
-            m for m in matches
-            if isinstance(m, dict)
-            and "label" in m
-            and "node_type" in m
-            and int(m.get("confidence", 0)) >= 85
-        ]
-    except Exception as e:
-        print(f"  [!] LLM mapping failed for '{raw_diagnosis}': {e}")
-        return []
-
-
-# ---------------------------------------------------------
-# 4. Graph Traversal Helper
+# 3. Graph Traversal Helper
 # ---------------------------------------------------------
 def get_tests_for_node(kg, label: str, node_type: str) -> list[str]:
     """Return all Test node labels reachable from a graph node via test edges.
@@ -279,25 +201,14 @@ def map_diagnoses_with_llm(
     graph_pkl_path: str,
     csv_output_path: str,
     row_limit: int | None = None,
+    resume: bool = False,
 ):
     # --- Load Graph & Build Node Catalogue ---
     print("Loading Knowledge Graph...")
     with open(graph_pkl_path, "rb") as f:
         kg = pickle.load(f)
 
-    # Build a catalogue of all matchable nodes: conditions + clinical finding types
-    available_nodes: list[dict] = []
-    for node_id, attrs in kg.nodes(data=True):
-        node_str = str(node_id)
-        for prefix, node_type in _PREFIX_TO_TYPE.items():
-            if node_str.startswith(f"{prefix}: "):
-                label = node_str[len(prefix) + 2:]
-                available_nodes.append({"label": label, "node_type": node_type})
-                break
-
-    cond_count = sum(1 for n in available_nodes if n["node_type"] == "Condition")
-    symp_count = sum(1 for n in available_nodes if n["node_type"] != "Condition")
-    print(f"Graph catalogue: {cond_count} conditions, {symp_count} clinical finding nodes.")
+    print(f"Graph loaded: {kg.number_of_nodes()} nodes, {kg.number_of_edges()} edges.")
 
     # --- Load CSV ---
     df = pd.read_csv(csv_input_path)
@@ -309,15 +220,44 @@ def map_diagnoses_with_llm(
         print(f"  [--limit] Restricting to first {row_limit} rows for testing.")
         df = df.head(row_limit)
 
-    unique_raw_diagnoses = df['dx'].dropna().unique()
-    print(f"Found {len(unique_raw_diagnoses)} unique raw diagnoses to map.")
-
-    # --- Perform LLM Mapping ---
-    print("Starting Azure OpenAI semantic matching...")
-    # mapping_dictionary: dx → list of {"label": ..., "node_type": ..., "tests": [...]}
+    # --- Resume: seed mapping_dictionary from existing output CSV ---
+    already_mapped: set[str] = set()
     mapping_dictionary: dict[str, list[dict]] = {}
 
-    for raw_diag in unique_raw_diagnoses:
+    if resume and os.path.exists(csv_output_path):
+        existing_df = pd.read_csv(csv_output_path)
+        if 'matched_graph_nodes' in existing_df.columns and 'potential_tests' in existing_df.columns:
+            for _, row in existing_df.dropna(subset=['matched_graph_nodes']).iterrows():
+                dx_val = row['dx']
+                if pd.isna(dx_val) or str(row.get('matched_graph_nodes', '')).strip() == '':
+                    continue
+                # Reconstruct a lightweight enriched list sufficient for formatting
+                nodes_str = str(row['matched_graph_nodes'])
+                tests_str = str(row['potential_tests']) if not pd.isna(row.get('potential_tests')) else ''
+                tests_list = [t.strip() for t in tests_str.split(',') if t.strip() and t.strip() != 'No linked tests found']
+                enriched_resume = []
+                for part in nodes_str.split(' | '):
+                    part = part.strip()
+                    if '(' in part and part.endswith(')'):
+                        lbl = part[:part.rfind('(')].strip()
+                        ntype = part[part.rfind('(') + 1:-1].strip()
+                        enriched_resume.append({'label': lbl, 'node_type': ntype, 'tests': tests_list, 'confidence': '?'})
+                mapping_dictionary[dx_val] = enriched_resume
+                already_mapped.add(dx_val)
+            print(f"  [resume] Loaded {len(already_mapped)} already-mapped diagnoses from '{csv_output_path}'.")
+        else:
+            print(f"  [resume] Output CSV found but missing expected columns — starting fresh.")
+
+    unique_raw_diagnoses = df['dx'].dropna().unique()
+    remaining = [d for d in unique_raw_diagnoses if d not in already_mapped]
+    print(f"Found {len(unique_raw_diagnoses)} unique raw diagnoses ({len(already_mapped)} already mapped, {len(remaining)} to process).")
+
+    # --- Perform Matching ---
+    print("Starting graph-only substring matching...")
+    graph_matched = 0
+    graph_unmatched = 0
+
+    for raw_diag in remaining:
         # Split on ';' to handle compound dx values (e.g. "chest pain; diaphoresis")
         terms = [t.strip() for t in str(raw_diag).split(";") if t.strip()]
 
@@ -325,13 +265,11 @@ def map_diagnoses_with_llm(
         enriched: list[dict] = []
 
         for term in terms:
-            # Graph-first: fast substring match, no LLM cost
             term_matches = get_graph_matches(term, kg)
-            source = "graph"
-            if not term_matches:
-                # LLM fallback for terms with no direct graph match
-                term_matches = get_semantic_matches(term, available_nodes)
-                source = "llm"
+            if term_matches:
+                graph_matched += 1
+            else:
+                graph_unmatched += 1
 
             for m in term_matches:
                 key = f"{m['node_type']}:{m['label']}"
@@ -341,12 +279,17 @@ def map_diagnoses_with_llm(
                     enriched.append({**m, "tests": tests})
 
             labels = " | ".join(
-                f"{m['label']} ({m['node_type']}, {m.get('confidence', '?')}%)"
+                f"{m['label']} ({m['node_type']})"
                 for m in term_matches
             ) or "no match"
-            print(f"  [{source}] '{term}' -> {labels}")
+            print(f"  [graph] '{term}' -> {labels}")
 
         mapping_dictionary[raw_diag] = enriched
+
+    total_terms = graph_matched + graph_unmatched
+    print(f"\n--- Matching Summary ---")
+    print(f"  Matched   : {graph_matched} / {total_terms} terms ({graph_matched/total_terms*100:.1f}%)" if total_terms else "  Matched   : 0")
+    print(f"  Unmatched : {graph_unmatched} / {total_terms} terms ({graph_unmatched/total_terms*100:.1f}%)" if total_terms else "  Unmatched : 0")
 
     # --- Map Results Back to DataFrame ---
     def format_matched_nodes(matches: list[dict]) -> str:
@@ -417,6 +360,13 @@ if __name__ == "__main__":
         "--limit", type=int, default=None, metavar="N",
         help="Process only the first N rows of the CSV. Useful for testing before a full run.",
     )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help=(
+            "Resume from an existing output CSV. Diagnoses already present in the output "
+            "are skipped; only new ones are processed."
+        ),
+    )
     args = parser.parse_args()
 
     result_df = map_diagnoses_with_llm(
@@ -424,6 +374,7 @@ if __name__ == "__main__":
         args.graph_pkl,
         args.output_csv,
         row_limit=args.limit,
+        resume=args.resume,
     )
 
     print("\n--- Output Preview ---")
