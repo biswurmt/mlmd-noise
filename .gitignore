@@ -240,6 +240,8 @@ data-processing/*.json
 *.parquet
 *.xlsx
 *.xls
+!data-processing/student_data_enriched_validation.csv
+
 
 # Frontend dependencies and build output
 diagnotix/frontend/node_modules/
