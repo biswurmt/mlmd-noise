@@ -52,6 +52,33 @@ _PREFIX_TO_TYPE = {
 # Edges that lead directly to a Test node
 _TEST_EDGES = {"REQUIRES_TEST", "DIRECTLY_INDICATES_TEST"}
 
+
+# ---------------------------------------------------------
+# Graph-first entity matching (no LLM cost)
+# ---------------------------------------------------------
+def get_graph_matches(raw_dx: str, kg) -> list[dict]:
+    """Return KG nodes whose label substring-matches raw_dx (or vice-versa).
+
+    Case-insensitive. Returns a list of {"label", "node_type", "confidence"}
+    dicts (confidence=100 for exact substring hits). Empty list if no match.
+    """
+    needle = raw_dx.strip().lower()
+    matches: list[dict] = []
+    seen: set[str] = set()
+    for node_id in kg.nodes:
+        node_str = str(node_id)
+        for prefix, node_type in _PREFIX_TO_TYPE.items():
+            if node_str.startswith(f"{prefix}: "):
+                label = node_str[len(prefix) + 2:]
+                label_lower = label.lower()
+                if needle in label_lower or label_lower in needle:
+                    key = f"{node_type}:{label}"
+                    if key not in seen:
+                        seen.add(key)
+                        matches.append({"label": label, "node_type": node_type, "confidence": 100})
+                break
+    return matches
+
 # Maps KG test-node label → CSV binary ground-truth column name
 TEST_COLUMN_MAP: dict[str, str] = {
     "ECG":                   "ecg_dx",
@@ -82,10 +109,10 @@ def _run_validation(df: pd.DataFrame) -> pd.DataFrame:
     """
     # Build binary prediction columns
     pred_col_map: dict[str, str] = {
-        "ecg_dx":         "pred_ecg",
-        "xray_arm_dx":    "pred_xray_arm",
-        "us_app_dx":      "pred_us_app",
-        "us_testes_dx":   "pred_us_testes",
+        "ecg_dx":         "ecg_kg",
+        "xray_arm_dx":    "xray_arm_kg",
+        "us_app_dx":      "us_app_kg",
+        "us_testes_dx":   "us_testes_kg",
     }
     # Reverse: gt_col → test name(s)
     gt_to_tests: dict[str, list[str]] = {}
@@ -209,10 +236,10 @@ def get_semantic_matches(raw_diagnosis: str, available_nodes: list[dict]) -> lis
 def get_tests_for_node(kg, label: str, node_type: str) -> list[str]:
     """Return all Test node labels reachable from a graph node via test edges.
 
-    Conditions are connected via REQUIRES_TEST; all other node types are
-    connected via DIRECTLY_INDICATES_TEST.
+    Follows two paths:
+      1-hop:  node  --[DIRECTLY_INDICATES_TEST | REQUIRES_TEST]--> Test
+      2-hop:  node  --[INDICATES_CONDITION]--> Condition --[REQUIRES_TEST]--> Test
     """
-    # Reconstruct the full node ID from label + type
     reverse_prefix = {v: k for k, v in _PREFIX_TO_TYPE.items()}
     prefix = reverse_prefix.get(node_type, node_type)
     node_id = f"{prefix}: {label}"
@@ -220,10 +247,27 @@ def get_tests_for_node(kg, label: str, node_type: str) -> list[str]:
     if node_id not in kg.nodes:
         return []
 
-    tests = []
+    seen: set[str] = set()
+    tests: list[str] = []
+
     for _, target, edge_data in kg.out_edges(node_id, data=True):
-        if edge_data.get("relationship") in _TEST_EDGES:
-            tests.append(str(target).replace("Test: ", ""))
+        rel = edge_data.get("relationship")
+        if rel in _TEST_EDGES:
+            # 1-hop direct test edge
+            test_label = str(target).replace("Test: ", "")
+            if test_label not in seen:
+                seen.add(test_label)
+                tests.append(test_label)
+        elif rel == "INDICATES_CONDITION":
+            # 2-hop: follow condition → test
+            condition_node = target
+            for _, test_node, cond_edge in kg.out_edges(condition_node, data=True):
+                if cond_edge.get("relationship") == "REQUIRES_TEST":
+                    test_label = str(test_node).replace("Test: ", "")
+                    if test_label not in seen:
+                        seen.add(test_label)
+                        tests.append(test_label)
+
     return tests
 
 
@@ -235,7 +279,6 @@ def map_diagnoses_with_llm(
     graph_pkl_path: str,
     csv_output_path: str,
     row_limit: int | None = None,
-    validate: bool = False,
 ):
     # --- Load Graph & Build Node Catalogue ---
     print("Loading Knowledge Graph...")
@@ -275,17 +318,35 @@ def map_diagnoses_with_llm(
     mapping_dictionary: dict[str, list[dict]] = {}
 
     for raw_diag in unique_raw_diagnoses:
-        matches = get_semantic_matches(raw_diag, available_nodes)
-        enriched = []
-        for m in matches:
-            tests = get_tests_for_node(kg, m["label"], m["node_type"])
-            enriched.append({**m, "tests": tests})
+        # Split on ';' to handle compound dx values (e.g. "chest pain; diaphoresis")
+        terms = [t.strip() for t in str(raw_diag).split(";") if t.strip()]
+
+        seen_labels: set[str] = set()
+        enriched: list[dict] = []
+
+        for term in terms:
+            # Graph-first: fast substring match, no LLM cost
+            term_matches = get_graph_matches(term, kg)
+            source = "graph"
+            if not term_matches:
+                # LLM fallback for terms with no direct graph match
+                term_matches = get_semantic_matches(term, available_nodes)
+                source = "llm"
+
+            for m in term_matches:
+                key = f"{m['node_type']}:{m['label']}"
+                if key not in seen_labels:
+                    seen_labels.add(key)
+                    tests = get_tests_for_node(kg, m["label"], m["node_type"])
+                    enriched.append({**m, "tests": tests})
+
+            labels = " | ".join(
+                f"{m['label']} ({m['node_type']}, {m.get('confidence', '?')}%)"
+                for m in term_matches
+            ) or "no match"
+            print(f"  [{source}] '{term}' -> {labels}")
+
         mapping_dictionary[raw_diag] = enriched
-        labels = " | ".join(
-            f"{m['label']} ({m['node_type']}, {m.get('confidence', '?')}%)"
-            for m in enriched
-        ) or "no match"
-        print(f"  '{raw_diag}' -> {labels}")
 
     # --- Map Results Back to DataFrame ---
     def format_matched_nodes(matches: list[dict]) -> str:
@@ -314,19 +375,17 @@ def map_diagnoses_with_llm(
     df.to_csv(csv_output_path, index=False)
     print(f"\nSuccess! Saved enriched data to '{csv_output_path}'")
 
-    # --- Validation ---
-    if validate:
-        missing = [col for col in TEST_COLUMN_MAP.values() if col not in df.columns]
-        if missing:
-            print(f"\n[!] --validate: ground-truth column(s) not found in CSV: {missing}")
-            print("    Skipping validation. Check that the CSV contains the expected columns.")
-        else:
-            metrics_df = _run_validation(df)
-            validation_path = csv_output_path.replace(".csv", "_validation.csv")
-            metrics_df.to_csv(validation_path, index=False)
-            print(f"\nValidation report saved to '{validation_path}'")
-            # Re-save enriched CSV with pred_* columns included
-            df.to_csv(csv_output_path, index=False)
+    # --- Validation (always runs when ground-truth columns are present) ---
+    missing = [col for col in TEST_COLUMN_MAP.values() if col not in df.columns]
+    if missing:
+        print(f"\n[!] Validation skipped: ground-truth column(s) not found in CSV: {missing}")
+    else:
+        metrics_df = _run_validation(df)
+        validation_path = csv_output_path.replace(".csv", "_validation.csv")
+        metrics_df.to_csv(validation_path, index=False)
+        print(f"\nValidation report saved to '{validation_path}'")
+        # Re-save enriched CSV with *_kg columns included
+        df.to_csv(csv_output_path, index=False)
 
     return df
 
@@ -335,6 +394,8 @@ def map_diagnoses_with_llm(
 # ---------------------------------------------------------
 if __name__ == "__main__":
     _KG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "knowledge-graphs"))
+    _KG_PKL_FILE = os.environ.get("KG_PKL_FILE", "triage_knowledge_graph_enriched.pkl")
+    _DEFAULT_PKL = os.path.join(_KG_DIR, _KG_PKL_FILE)
 
     parser = argparse.ArgumentParser(
         description="Semantically map patient diagnoses (dx column) to knowledge-graph conditions."
@@ -349,20 +410,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--graph-pkl",
-        default=os.path.join(_KG_DIR, "triage_knowledge_graph.pkl"),
-        help="Path to triage_knowledge_graph.pkl.",
+        default=_DEFAULT_PKL,
+        help=f"Path to the knowledge graph PKL file (default: {_KG_PKL_FILE} from KG_PKL_FILE env).",
     )
     parser.add_argument(
         "--limit", type=int, default=None, metavar="N",
         help="Process only the first N rows of the CSV. Useful for testing before a full run.",
-    )
-    parser.add_argument(
-        "--validate", action="store_true",
-        help=(
-            "After mapping, compare predicted tests against binary ground-truth columns "
-            "(ecg_dx, xray_arm_dx, us_app_dx, us_testes_dx) and print per-test metrics. "
-            "Writes a <output>_validation.csv alongside the enriched CSV."
-        ),
     )
     args = parser.parse_args()
 
@@ -371,7 +424,6 @@ if __name__ == "__main__":
         args.graph_pkl,
         args.output_csv,
         row_limit=args.limit,
-        validate=args.validate,
     )
 
     print("\n--- Output Preview ---")

@@ -30,7 +30,7 @@ from datetime import datetime
 
 import networkx as nx
 
-PKL_PATH = os.path.join(os.path.dirname(__file__), "triage_knowledge_graph.pkl")
+PKL_PATH = os.path.join(os.path.dirname(__file__), "triage_knowledge_graph_enriched.pkl")
 
 TEST_TYPE = "Diagnostic_Test"
 
