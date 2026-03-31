@@ -31,6 +31,12 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **kwargs):  # silent no-op fallback
+        return iterable
+
 # Load .env from knowledge-graphs/ (same path as csv_mapping.py)
 _current_dir = os.path.dirname(__file__)
 _env_path = os.path.abspath(os.path.join(_current_dir, "..", "knowledge-graphs", ".env"))
@@ -153,6 +159,18 @@ def _format_potential_tests(matches: list[dict], min_nodes: int) -> str:
 
 
 # ── Main pipeline ──────────────────────────────────────────────────────────────
+def _save_partial(df: pd.DataFrame, mapping_dictionary: dict, min_nodes: int, path: str) -> None:
+    """Write current mapping results to disk without blocking the main loop."""
+    df = df.copy()
+    df["matched_graph_nodes"] = df["dx"].map(
+        lambda dx: _format_matched_nodes(mapping_dictionary.get(dx, []))
+    )
+    df["potential_tests"] = df["dx"].map(
+        lambda dx: _format_potential_tests(mapping_dictionary.get(dx, []), min_nodes)
+    )
+    df.to_csv(path, index=False)
+
+
 def map_diagnoses_semantic(
     csv_input_path: str,
     graph_pkl_path: str,
@@ -162,6 +180,7 @@ def map_diagnoses_semantic(
     min_nodes: int = 1,
     semantic_top_k: int = _SEMANTIC_TOP_K,
     semantic_threshold: float = _SEMANTIC_MIN_SIM,
+    save_every: int = 100,
 ):
     # Load KG
     print("Loading Knowledge Graph...")
@@ -225,12 +244,20 @@ def map_diagnoses_semantic(
     # Semantic matching
     print(
         f"Starting semantic matching (top_k={semantic_top_k}, "
-        f"threshold={semantic_threshold}) ..."
+        f"threshold={semantic_threshold}, save_every={save_every}) ..."
     )
     semantic_matched = 0
     semantic_unmatched = 0
 
-    for raw_diag in remaining:
+    progress = tqdm(
+        remaining,
+        total=len(remaining),
+        unit="dx",
+        desc="Mapping",
+        dynamic_ncols=True,
+    )
+
+    for i, raw_diag in enumerate(progress, 1):
         terms = [t.strip() for t in str(raw_diag).split(";") if t.strip()]
 
         seen_labels: set[str] = set()
@@ -259,9 +286,19 @@ def map_diagnoses_semantic(
                 )
                 or "no match"
             )
-            print(f"  [semantic] '{term}' -> {labels}")
+            tqdm.write(f"  [semantic] '{term}' -> {labels}")
 
         mapping_dictionary[raw_diag] = enriched
+
+        # Update progress bar suffix with live match rate
+        total_so_far = semantic_matched + semantic_unmatched
+        match_pct = semantic_matched / total_so_far * 100 if total_so_far else 0
+        progress.set_postfix(matched=f"{match_pct:.1f}%", refresh=False)
+
+        # Incremental save every save_every unique diagnoses
+        if save_every > 0 and i % save_every == 0:
+            _save_partial(df, mapping_dictionary, min_nodes, csv_output_path)
+            tqdm.write(f"  [checkpoint] Saved {i}/{len(remaining)} diagnoses → '{csv_output_path}'")
 
     total_terms = semantic_matched + semantic_unmatched
     print("\n--- Matching Summary ---")
@@ -354,6 +391,13 @@ if __name__ == "__main__":
         "--semantic-threshold", type=float, default=_SEMANTIC_MIN_SIM, metavar="F",
         help=f"Min cosine similarity 0–1 for a match to be accepted (default: {_SEMANTIC_MIN_SIM}).",
     )
+    parser.add_argument(
+        "--save-every", type=int, default=100, metavar="N",
+        help=(
+            "Save partial results to the output CSV every N unique diagnoses processed. "
+            "Enables --resume to pick up from the last checkpoint. Set 0 to disable. Default: 100."
+        ),
+    )
     args = parser.parse_args()
 
     result_df = map_diagnoses_semantic(
@@ -365,6 +409,7 @@ if __name__ == "__main__":
         min_nodes=args.min_nodes,
         semantic_top_k=args.semantic_top_k,
         semantic_threshold=args.semantic_threshold,
+        save_every=args.save_every,
     )
 
     print("\n--- Output Preview ---")
