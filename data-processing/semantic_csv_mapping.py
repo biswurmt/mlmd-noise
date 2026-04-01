@@ -146,7 +146,10 @@ def get_graph_matches_semantic(
 def _format_matched_nodes(matches: list[dict]) -> str:
     if not matches:
         return ""
-    return " | ".join(f"{m['label']} ({m['node_type']})" for m in matches)
+    return " | ".join(
+        f"{m['label']} ({m['node_type']}) [{m.get('confidence', '?')}%]"
+        for m in matches
+    )
 
 
 def _format_potential_tests(matches: list[dict], min_nodes: int) -> str:
@@ -180,7 +183,7 @@ def map_diagnoses_semantic(
     min_nodes: int = 1,
     semantic_top_k: int = _SEMANTIC_TOP_K,
     semantic_threshold: float = _SEMANTIC_MIN_SIM,
-    save_every: int = 100,
+    save_every: int = 10,
 ):
     # Load KG
     print("Loading Knowledge Graph...")
@@ -219,6 +222,9 @@ def map_diagnoses_semantic(
                 enriched_resume = []
                 for part in nodes_str.split(" | "):
                     part = part.strip()
+                    # Strip trailing [score%] bracket added by _format_matched_nodes
+                    if part.endswith("]") and "[" in part:
+                        part = part[: part.rfind("[")].strip()
                     if "(" in part and part.endswith(")"):
                         lbl = part[: part.rfind("(")].strip()
                         ntype = part[part.rfind("(") + 1 : -1].strip()
@@ -233,6 +239,13 @@ def map_diagnoses_semantic(
             )
         else:
             print("  [resume] Output CSV found but missing expected columns — starting fresh.")
+
+    if not resume and os.path.exists(csv_output_path):
+        print(
+            f"  [warning] Output file '{csv_output_path}' already exists but --resume was not set.\n"
+            f"            Re-run with --resume to continue from the last checkpoint.\n"
+            f"            Proceeding will OVERWRITE existing results."
+        )
 
     unique_raw_diagnoses = df["dx"].dropna().unique()
     remaining = [d for d in unique_raw_diagnoses if d not in already_mapped]
@@ -257,48 +270,54 @@ def map_diagnoses_semantic(
         dynamic_ncols=True,
     )
 
-    for i, raw_diag in enumerate(progress, 1):
-        terms = [t.strip() for t in str(raw_diag).split(";") if t.strip()]
+    try:
+        for i, raw_diag in enumerate(progress, 1):
+            terms = [t.strip() for t in str(raw_diag).split(";") if t.strip()]
 
-        seen_labels: set[str] = set()
-        enriched: list[dict] = []
+            seen_labels: set[str] = set()
+            enriched: list[dict] = []
 
-        for term in terms:
-            term_matches = get_graph_matches_semantic(
-                term, top_k=semantic_top_k, min_score=semantic_threshold
-            )
-            if term_matches:
-                semantic_matched += 1
-            else:
-                semantic_unmatched += 1
-
-            for m in term_matches:
-                key = f"{m['node_type']}:{m['label']}"
-                if key not in seen_labels:
-                    seen_labels.add(key)
-                    tests = get_tests_for_node(kg, m["label"], m["node_type"])
-                    enriched.append({**m, "tests": tests})
-
-            labels = (
-                " | ".join(
-                    f"{m['label']} ({m['node_type']}) [{m['confidence']:.1f}%]"
-                    for m in term_matches
+            for term in terms:
+                term_matches = get_graph_matches_semantic(
+                    term, top_k=semantic_top_k, min_score=semantic_threshold
                 )
-                or "no match"
-            )
-            tqdm.write(f"  [semantic] '{term}' -> {labels}")
+                if term_matches:
+                    semantic_matched += 1
+                else:
+                    semantic_unmatched += 1
 
-        mapping_dictionary[raw_diag] = enriched
+                for m in term_matches:
+                    key = f"{m['node_type']}:{m['label']}"
+                    if key not in seen_labels:
+                        seen_labels.add(key)
+                        tests = get_tests_for_node(kg, m["label"], m["node_type"])
+                        enriched.append({**m, "tests": tests})
 
-        # Update progress bar suffix with live match rate
-        total_so_far = semantic_matched + semantic_unmatched
-        match_pct = semantic_matched / total_so_far * 100 if total_so_far else 0
-        progress.set_postfix(matched=f"{match_pct:.1f}%", refresh=False)
+                labels = (
+                    " | ".join(
+                        f"{m['label']} ({m['node_type']}) [{m['confidence']:.1f}%]"
+                        for m in term_matches
+                    )
+                    or "no match"
+                )
+                tqdm.write(f"  [semantic] '{term}' -> {labels}")
 
-        # Incremental save every save_every unique diagnoses
-        if save_every > 0 and i % save_every == 0:
+            mapping_dictionary[raw_diag] = enriched
+
+            # Update progress bar suffix with live match rate
+            total_so_far = semantic_matched + semantic_unmatched
+            match_pct = semantic_matched / total_so_far * 100 if total_so_far else 0
+            progress.set_postfix(matched=f"{match_pct:.1f}%", refresh=False)
+
+            # Incremental save every save_every unique diagnoses
+            if save_every > 0 and i % save_every == 0:
+                _save_partial(df, mapping_dictionary, min_nodes, csv_output_path)
+                tqdm.write(f"  [checkpoint] Saved {i}/{len(remaining)} diagnoses → '{csv_output_path}'")
+    finally:
+        # Always flush current state on any exit (crash, KeyboardInterrupt, etc.)
+        if mapping_dictionary:
             _save_partial(df, mapping_dictionary, min_nodes, csv_output_path)
-            tqdm.write(f"  [checkpoint] Saved {i}/{len(remaining)} diagnoses → '{csv_output_path}'")
+            tqdm.write(f"  [checkpoint] Final flush: {len(mapping_dictionary)} diagnoses saved → '{csv_output_path}'")
 
     total_terms = semantic_matched + semantic_unmatched
     print("\n--- Matching Summary ---")
@@ -392,10 +411,10 @@ if __name__ == "__main__":
         help=f"Min cosine similarity 0–1 for a match to be accepted (default: {_SEMANTIC_MIN_SIM}).",
     )
     parser.add_argument(
-        "--save-every", type=int, default=100, metavar="N",
+        "--save-every", type=int, default=10, metavar="N",
         help=(
             "Save partial results to the output CSV every N unique diagnoses processed. "
-            "Enables --resume to pick up from the last checkpoint. Set 0 to disable. Default: 100."
+            "Enables --resume to pick up from the last checkpoint. Set 0 to disable. Default: 10."
         ),
     )
     args = parser.parse_args()
