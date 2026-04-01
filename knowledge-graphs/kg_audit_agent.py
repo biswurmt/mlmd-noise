@@ -280,16 +280,34 @@ def _parse_json_response(text: str) -> dict | None:
 
 _PERSONA_A_SYSTEM = """\
 You are an Emergency Medicine QA Auditor. Review retrieved guideline chunks to
-determine whether the stated clinical pathway is explicitly supported by an
-authoritative ED guideline body.
+determine whether the stated clinical pathway is supported by an authoritative
+ED guideline body. When retrieved chunks are absent or unhelpful, reason from
+the embedded canonical ED decision rules below.
+
+CANONICAL ED DECISION RULES (authoritative fallback — use when chunks are sparse):
+• ECG: AHA/ACC + CTAS mandate ECG as first-line for any chest pain, palpitations,
+  syncope, diaphoresis, jaw/arm pain, or HR/BP abnormality with possible cardiac cause.
+• CT Head: Canadian CT Head Rule (NICE NG232, ACR) — mandatory CT for GCS <15 at 2h,
+  suspected open/depressed skull fracture, any sign of basal skull fracture, vomiting ≥2×,
+  age ≥65, amnesia >30min, dangerous mechanism, post-traumatic seizure, focal neuro deficit,
+  GCS deterioration after admission. GCS ≤12 is an unambiguous CT indication.
+• Testicular Ultrasound: ACR + NICE — scrotal/testicular ultrasound is first-line for
+  acute scrotal pain; cannot exclude torsion clinically; time-critical < 6h.
+• Arm / Wrist X-Ray: ACR — standard first-line for any trauma to extremity with pain,
+  deformity, or mechanism of injury (FOOSH, direct blow, crush). Ottawa rules apply to
+  ankle/knee; ACR AC supports X-ray for upper-extremity trauma.
+• Appendix / Abdominal Ultrasound: ACR + NICE — ultrasound first-line for RLQ pain,
+  suspected appendicitis, or pelvic pain in females of childbearing age.
+• Chest X-Ray: ACR + ACEP + IDSA — standard for dyspnoea, cough, fever, suspected
+  pneumonia, PE workup, or chest trauma.
 
 Focus on:
-1. Does an authoritative ED guideline body (ACEP, CAEP, NICE, AHA/ACC, CTAS, ACR)
-   explicitly recommend or endorse this test for this presentation?
-2. Does the pathway appropriately incorporate validated clinical decision rules
-   (Wells Score, Ottawa Rules, HEART Score, PECARN, NEXUS, Canadian CT Head Rule)
-   before ordering the test, when applicable?
+1. Does an authoritative ED guideline body explicitly support this test for this
+   presentation? Use retrieved chunks first; fall back to the canonical rules above.
+2. Is a validated clinical decision rule (Wells, Ottawa, HEART, PECARN, NEXUS,
+   Canadian CT Head Rule) required before ordering this test?
 3. Does any "Choosing Wisely" initiative flag this test as potentially overused in ED?
+   (Note: ECG and plain X-ray are almost never flagged; CT and MRI sometimes are.)
 
 Return ONLY valid JSON — no markdown fences, no explanation:
 {
@@ -297,7 +315,7 @@ Return ONLY valid JSON — no markdown fences, no explanation:
   "matched_guideline": "<body + section if found, else null>",
   "decision_rule_required": "<rule name if applicable, else null>",
   "choosing_wisely_flag": true | false,
-  "excerpt": "<most relevant 1-2 sentence quote from retrieved chunks, or null>"
+  "excerpt": "<most relevant 1-2 sentence quote from retrieved chunks or canonical rules>"
 }"""
 
 
@@ -461,9 +479,17 @@ Evaluate whether this pathway reflects sound acute-care practice by checking:
    an urgent rule-out test to be ordered immediately?
 3. Safe discharge: If the test result is negative, does the pathway logically
    support safe discharge, or does it leave a dangerous diagnostic gap?
-4. Never-event risk: Could this pathway lead to a missed time-sensitive diagnosis
-   (STEMI, acute stroke, testicular torsion, ectopic pregnancy, cord compression,
-   necrotizing fasciitis)?
+4. Wrong test concern: Is this clearly the WRONG test for the stated condition?
+   For example: ordering an appendix ultrasound for suspected ovarian torsion is
+   wrong (pelvic/transvaginal US is required). Set wrong_test_concern=true when
+   a different test is clearly needed for this specific diagnosis.
+5. Never-event mitigation: Is this test the standard-of-care response to a
+   potentially catastrophic, time-sensitive diagnosis? Set
+   pathway_is_never_event_mitigation=true when ordering this test is EXACTLY what
+   should be done to catch or rule out the life-threatening condition.
+   Examples: ECG for chest pain (STEMI) = true. CT Head for GCS ≤12 (TBI) = true.
+   Testicular US for acute scrotal pain (torsion) = true.
+   This is a CONFIDENCE BOOSTER, not a flag.
 
 Return ONLY valid JSON — no markdown fences, no explanation:
 {
@@ -471,9 +497,10 @@ Return ONLY valid JSON — no markdown fences, no explanation:
   "over_testing_concern": true | false,
   "under_testing_concern": true | false,
   "red_flag_present": true | false,
-  "never_event_risk": true | false,
+  "wrong_test_concern": true | false,
+  "pathway_is_never_event_mitigation": true | false,
   "concerns": ["<concise concern>"],
-  "safer_first_step": "<cheaper or faster bedside alternative, or null>"
+  "safer_first_step": "<a different test that should be ordered instead, or null>"
 }"""
 
 
@@ -498,7 +525,8 @@ def _persona_c(triad: dict) -> dict:
             "over_testing_concern": False,
             "under_testing_concern": False,
             "red_flag_present": False,
-            "never_event_risk": False,
+            "wrong_test_concern": False,
+            "pathway_is_never_event_mitigation": False,
             "concerns": [],
             "safer_first_step": None,
             "_parse_error": raw[:200],
@@ -512,32 +540,43 @@ def _persona_c(triad: dict) -> dict:
 
 _PERSONA_D_SYSTEM = """\
 You are the ED Medical Director reviewing a KG pathway audit. You have received
-three independent assessments from: a Protocol Enforcer (guideline compliance),
-a Literature Researcher (evidence recency), and an ED Attending (clinical flow).
+three independent assessments. Synthesize them into a final verdict.
 
-Synthesize them into a final verdict. Prioritize patient safety and rapid
-rule-out of life-threatening conditions above all else.
+KEY PRINCIPLE: In emergency medicine, a pathway that uses the correct test to
+detect or rule out a life-threatening diagnosis is the GOLD STANDARD. If the
+ED Attending says pathway_is_never_event_mitigation=true, that is a CONFIDENCE
+BOOSTER — it means the test is clinically mandated, not a problem.
 
 Weighting guidance:
-- Persona A (protocol): carries most weight. "strong" guideline support overrides
-  minor clinical concerns. "none" support is a strong signal toward Flagged/Rejected.
-- Persona B (literature): refines confidence. High paper count + current recency +
-  NPV data → higher score. Zero papers → reduce confidence by 0.15–0.25.
-- Persona C (clinical pragmatism): hard veto ONLY when never_event_risk=true, OR
-  when both over_testing_concern=true AND support_level is "weak" or "none".
+- Persona A (protocol): carries most weight. "strong" or "moderate" support →
+  pathway is likely Verified. "none" with no fallback clinical rationale → Flagged.
+- Persona B (literature): refines confidence. High paper count + current recency
+  + npv_mentioned → add 0.05–0.10. Zero papers → subtract 0.10–0.15.
+- Persona C (clinical flow):
+    • pathway_is_never_event_mitigation=true → ADD 0.10 to confidence score
+      (ordering this test is the correct mitigation for a catastrophic diagnosis).
+    • wrong_test_concern=true → hard-flag as "Wrong test for condition" regardless
+      of other scores (this is a genuine clinical error in the KG).
+    • over_testing_concern=true alone (no wrong_test_concern) → subtract 0.05–0.10.
 
 Hard-flag triggers — always output "Flagged for Review" regardless of score:
+  • Persona C: wrong_test_concern = true
+    (a different test is needed; this pathway contains a clinical error)
   • Persona A: choosing_wisely_flag = true
-  • Persona C: never_event_risk = true
-  • Persona B: poc_alternative_found = true when test is invasive or radioactive
-  • Rule-out pathway where Persona A support_level is "weak" or "none"
-    (a missed rule-out in the ED is a direct patient safety risk)
+    (explicitly flagged as overused in ED by a professional body)
+  • Rule-out pathway where Persona A support_level is "none" AND Persona B
+    paper_count = 0 (no evidence at all for a rule-out pathway = patient safety risk)
+
+Do NOT hard-flag based on pathway_is_never_event_mitigation. Do NOT hard-flag
+based on poc_alternative_found alone (POCUS is a complement, not a replacement,
+for most of these tests). Do NOT penalize a pathway simply because the condition
+being diagnosed is serious.
 
 Confidence scoring guidance (0.0–1.0):
-  • 0.85–1.00 : Verified — strong guideline support + current literature + no concerns
-  • 0.70–0.84 : Verified — good evidence, minor concerns only
-  • 0.50–0.69 : Flagged for Review — mixed evidence or process concern
-  • 0.00–0.49 : Rejected — no guideline support, clinical concerns, or zero literature
+  • 0.85–1.00 : Verified — strong/moderate guideline support + no wrong_test_concern
+  • 0.70–0.84 : Verified — good evidence, minor concerns addressable in practice
+  • 0.50–0.69 : Flagged for Review — mixed or weak evidence, process concern
+  • 0.00–0.49 : Rejected — no guideline support AND clinical concern or zero literature
 
 Return ONLY valid JSON — no markdown fences, no explanation:
 {
@@ -658,14 +697,16 @@ def _enrich_graph(G, results: list[dict]) -> None:
         if r is None:
             continue
 
-        data["audit_status"]       = r["status"]
-        data["confidence_score"]   = r["confidence_score"]
-        data["last_audited"]       = now_iso
-        data["persona_a_support"]  = r["persona_a"].get("support_level", "none")
-        data["persona_b_papers"]   = r["persona_b"].get("paper_count", 0)
-        data["persona_c_concerns"] = r["persona_c"].get("concerns", [])
-        data["hard_flag_reason"]   = r["hard_flag_reason"]
-        data["audit_rationale"]    = r["rationale"]
+        data["audit_status"]              = r["status"]
+        data["confidence_score"]          = r["confidence_score"]
+        data["last_audited"]              = now_iso
+        data["persona_a_support"]         = r["persona_a"].get("support_level", "none")
+        data["persona_b_papers"]          = r["persona_b"].get("paper_count", 0)
+        data["persona_c_concerns"]        = r["persona_c"].get("concerns", [])
+        data["persona_c_wrong_test"]      = r["persona_c"].get("wrong_test_concern", False)
+        data["persona_c_never_event_mit"] = r["persona_c"].get("pathway_is_never_event_mitigation", False)
+        data["hard_flag_reason"]          = r["hard_flag_reason"]
+        data["audit_rationale"]           = r["rationale"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -678,7 +719,7 @@ def _generate_report(results: list[dict], args) -> None:
     flagged   = [r for r in results if r["status"] == "Flagged for Review"]
     rejected  = [r for r in results if r["status"] == "Rejected"]
     hard_flag = [r for r in results if r.get("hard_flag_reason")]
-    never_ev  = [r for r in results if r["persona_c"].get("never_event_risk")]
+    never_ev  = [r for r in results if r["persona_c"].get("wrong_test_concern")]
 
     total = len(results)
     mean_conf = (
@@ -697,7 +738,7 @@ def _generate_report(results: list[dict], args) -> None:
             "rejected":        len(rejected),
             "mean_confidence": round(mean_conf, 3),
             "hard_flagged":    len(hard_flag),
-            "never_event_risks": len(never_ev),
+            "wrong_test_concerns": len(never_ev),
         },
         "triads": results,
     }
@@ -718,7 +759,7 @@ def _generate_report(results: list[dict], args) -> None:
     print(f"  Rejected:           {len(rejected):3d}  ({100*len(rejected)/max(total,1):.1f}%)"
           f"   mean confidence: "
           f"{sum(r['confidence_score'] for r in rejected)/max(len(rejected),1):.2f}")
-    print(f"  Hard-flagged:       {len(hard_flag):3d}  (never-event risk or Choosing Wisely)")
+    print(f"  Hard-flagged:       {len(hard_flag):3d}  (wrong test or Choosing Wisely)")
 
     attention = flagged + rejected
     if attention:
