@@ -15,6 +15,12 @@ wget
 
 beautifulsoup4>=4.12.0
 
-# --- Vector DB & Embeddings ---
-qdrant-client>=1.9.0
+# --- Vector DB & Embeddings (legacy Qdrant / Nebius stack) ---
+qdrant-client>=1.9.0   # legacy: used by build_vector_db.py only
+
+# --- Vector DB & Embeddings (local ChromaDB / MedEmbed stack) ---
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+torch>=2.0.0            # CPU build sufficient; for GPU install the CUDA variant separately
+
 datasets>=2.0.0
