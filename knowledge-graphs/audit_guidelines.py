@@ -1,6 +1,15 @@
 """audit_guidelines.py
 ======================
-Retroactively audits guideline_rules.json in three passes (run in order):
+Retroactively audits guideline_rules.json in four passes (run in order):
+
+  Pass 0 — Specificity check (always runs first, before any API calls)
+    Flags raw_symptom and condition values that appear across >= N distinct test
+    pathways (default N=3).  A node like "pediatric assessment" that shows up in
+    ECG, Testicular Ultrasound, and Arm X-Ray rules is too generic to guide triage
+    routing and should be removed from the source rules.
+    Flagged rules are written to nonspecific_rules.json for manual review — they
+    are NOT automatically removed so you can inspect them before deciding.
+    Use --specificity-threshold to adjust N, or --skip-specificity to disable.
 
   Pass 1 — Name normalisation (always runs first)
     Replaces LLM-invented condition and symptom strings with canonical names
@@ -25,10 +34,12 @@ Retroactively audits guideline_rules.json in three passes (run in order):
 
 Usage
 -----
-  python audit_guidelines.py                                    # normalise + verify, write in-place
+  python audit_guidelines.py                                    # all passes, write in-place
   python audit_guidelines.py --dry-run                         # report only, no file changes
-  python audit_guidelines.py --skip-verify                     # normalise names only
-  python audit_guidelines.py --skip-normalise                  # verify only
+  python audit_guidelines.py --skip-verify                     # normalise names only (+ specificity)
+  python audit_guidelines.py --skip-normalise                  # verify only (+ specificity)
+  python audit_guidelines.py --skip-specificity                # skip Pass 0 specificity check
+  python audit_guidelines.py --specificity-threshold 2         # flag nodes spanning >= 2 tests
   python audit_guidelines.py --rules-json /path/to/guideline_rules.json
   python audit_guidelines.py --grounding                       # Pass 2: PMC + web grounding before LLM review
   python audit_guidelines.py --grounding --flag-low-evidence   # also writes flagged_rules.json
@@ -415,6 +426,97 @@ def _is_low_evidence(evidence: dict) -> bool:
     return evidence["pmc_articles"] == 0 and len(evidence["ddg_snippets"]) == 0
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Specificity check
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_specificity(
+    rules: list[dict],
+    threshold: int = 3,
+) -> tuple[list[dict], dict]:
+    """Flag rules whose raw_symptom or condition spans >= threshold distinct tests.
+
+    A node that appears across many test pathways (e.g. 'pediatric assessment'
+    in ECG, Testicular Ultrasound, and Arm X-Ray rules) is too generic to be
+    useful for triage routing — it does not meaningfully discriminate between
+    diagnostic paths.
+
+    Both the raw_symptom field (which becomes a KG node directly matched during
+    entity linking) and the condition field (which becomes a Condition node) are
+    checked, since either can produce overly generic graph nodes.
+
+    Args:
+        rules:     The rule list to inspect (after deduplication).
+        threshold: Minimum number of distinct tests a term must span to be
+                   considered non-specific. Default: 3.
+
+    Returns:
+        flagged_rules: Rules where at least one field is non-specific.
+                       Each rule gets a '_nonspecific_reasons' key explaining
+                       which field triggered the flag and which tests it spans.
+        report:        Summary dict with:
+                         'nonspecific_symptoms'   — {raw_symptom: [tests]}
+                         'nonspecific_conditions' — {condition: [tests]}
+                       Both sorted by descending test count.
+    """
+    from collections import defaultdict
+
+    sym_to_tests:  dict[str, set] = defaultdict(set)
+    cond_to_tests: dict[str, set] = defaultdict(set)
+
+    for rule in rules:
+        test = rule.get("test",        "").strip()
+        sym  = rule.get("raw_symptom", "").strip()
+        cond = rule.get("condition",   "").strip()
+        if sym:
+            sym_to_tests[sym.lower()].add(test)
+        if cond:
+            cond_to_tests[cond.lower()].add(test)
+
+    # Terms that exceed the cross-test threshold
+    nonspecific_syms  = {s: t for s, t in sym_to_tests.items()  if len(t) >= threshold}
+    nonspecific_conds = {c: t for c, t in cond_to_tests.items() if len(t) >= threshold}
+
+    # Annotate each offending rule with human-readable reasons
+    flagged: list[dict] = []
+    for rule in rules:
+        sym  = rule.get("raw_symptom", "").strip().lower()
+        cond = rule.get("condition",   "").strip().lower()
+        reasons: list[str] = []
+
+        if sym in nonspecific_syms:
+            tests_sorted = sorted(nonspecific_syms[sym])
+            reasons.append(
+                f"raw_symptom '{rule['raw_symptom']}' spans "
+                f"{len(nonspecific_syms[sym])} tests: {tests_sorted}"
+            )
+        if cond in nonspecific_conds:
+            tests_sorted = sorted(nonspecific_conds[cond])
+            reasons.append(
+                f"condition '{rule['condition']}' spans "
+                f"{len(nonspecific_conds[cond])} tests: {tests_sorted}"
+            )
+        if reasons:
+            flagged.append({**rule, "_nonspecific_reasons": reasons})
+
+    # Build report sorted by descending test-count (worst offenders first)
+    report = {
+        "nonspecific_symptoms": {
+            sym: sorted(tests)
+            for sym, tests in sorted(
+                nonspecific_syms.items(), key=lambda x: (-len(x[1]), x[0])
+            )
+        },
+        "nonspecific_conditions": {
+            cond: sorted(tests)
+            for cond, tests in sorted(
+                nonspecific_conds.items(), key=lambda x: (-len(x[1]), x[0])
+            )
+        },
+    }
+    return flagged, report
+
+
 def _icd10_canonical_name(term: str) -> str | None:
     """Return the UMLS canonical name for term (aligned with ICD-10 international), or None.
 
@@ -583,6 +685,8 @@ def audit(
     skip_normalise: bool,
     grounding: bool = False,
     flag_low_evidence: bool = False,
+    skip_specificity: bool = False,
+    specificity_threshold: int = 3,
 ):
     with open(rules_json_path, "r") as f:
         raw = json.load(f)
@@ -627,6 +731,69 @@ def audit(
         print(f"Deduplication: {n_dupes} exact duplicate(s) removed, {len(deduped)} unique rules remain.")
     schema_ok = deduped
     print(f"\n")
+
+    # ── Pass 0: Specificity Check ─────────────────────────────────────────────
+    # Flag raw_symptom and condition values that span >= specificity_threshold
+    # distinct test pathways — these are too generic to be useful for triage
+    # routing and should be reviewed for removal from the source rules.
+    # Rules are flagged (written to nonspecific_rules.json) but NOT removed from
+    # the main pipeline so all other passes still run on the full rule set.
+    if not skip_specificity:
+        print("=== Pass 0: Specificity Check ===")
+        flagged_nonspecific, spec_report = _check_specificity(
+            schema_ok, threshold=specificity_threshold
+        )
+
+        # Print symptom offenders
+        if spec_report["nonspecific_symptoms"]:
+            print(
+                f"  Non-specific raw_symptom values "
+                f"(appear in \u2265{specificity_threshold} tests):"
+            )
+            for sym, tests in spec_report["nonspecific_symptoms"].items():
+                print(f"    '{sym}'  \u2192  {tests}")
+        else:
+            print("  No non-specific raw_symptom values found.")
+
+        # Print condition offenders
+        if spec_report["nonspecific_conditions"]:
+            print(
+                f"\n  Non-specific condition values "
+                f"(appear in \u2265{specificity_threshold} tests):"
+            )
+            for cond, tests in spec_report["nonspecific_conditions"].items():
+                print(f"    '{cond}'  \u2192  {tests}")
+        else:
+            print("  No non-specific condition values found.")
+
+        # Write flagged rules to sidecar file
+        nonspecific_json_path = os.path.join(
+            os.path.dirname(os.path.abspath(rules_json_path)),
+            "nonspecific_rules.json",
+        )
+        if flagged_nonspecific:
+            print(
+                f"\n  {len(flagged_nonspecific)} rule(s) flagged across "
+                f"{len(spec_report['nonspecific_symptoms'])} symptom(s) and "
+                f"{len(spec_report['nonspecific_conditions'])} condition(s)."
+            )
+            if dry_run:
+                print(
+                    f"  --dry-run: would write flagged rules to '{nonspecific_json_path}'."
+                )
+            else:
+                with open(nonspecific_json_path, "w") as f:
+                    json.dump(flagged_nonspecific, f, indent=2)
+                print(
+                    f"  Written to '{nonspecific_json_path}'.\n"
+                    f"  Review and manually remove any confirmed non-specific rules,\n"
+                    f"  then re-run 'python build_kg.py' to rebuild the graph."
+                )
+        else:
+            print("\n  No non-specific rules to flag.")
+        print()
+    else:
+        print("=== Pass 0: Specificity Check (skipped) ===\n")
 
     # ── Pass 1: Name Normalisation (first — clean names before evidence/LLM) ────
     normalised_schema = schema_ok
@@ -832,6 +999,18 @@ if __name__ == "__main__":
             "excluded from LLM verification."
         ),
     )
+    parser.add_argument(
+        "--skip-specificity", action="store_true",
+        help="Skip Pass 0 (specificity check); do not flag cross-pathway generic nodes.",
+    )
+    parser.add_argument(
+        "--specificity-threshold", type=int, default=3, metavar="N",
+        help=(
+            "Number of distinct test pathways a raw_symptom or condition must span "
+            "to be considered non-specific and written to nonspecific_rules.json. "
+            "Default: 3 (out of the 4 active pathways)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.flag_low_evidence and not args.grounding:
@@ -844,4 +1023,6 @@ if __name__ == "__main__":
         skip_normalise=args.skip_normalise,
         grounding=args.grounding,
         flag_low_evidence=args.flag_low_evidence,
+        skip_specificity=args.skip_specificity,
+        specificity_threshold=args.specificity_threshold,
     )

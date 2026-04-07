@@ -42,7 +42,17 @@ EMBED_BATCH_SIZE   = 32    # sentences per model.encode() call
 CHROMA_UPSERT_BATCH = 100  # nodes per collection.upsert() call
 
 MEDEMBED_MODEL = os.environ.get("MEDEMBED_MODEL", "abhinand/MedEmbed-large-v0.1")
-CHROMA_PATH    = os.environ.get("CHROMA_PATH", str(Path(__file__).parent / "chroma_db"))
+
+# Resolve CHROMA_PATH against the script's own directory so the DB location is
+# stable regardless of the caller's working directory.  A relative path in the
+# env var (e.g. "chroma_db" or "./chroma_db") is anchored to this file's parent;
+# an absolute path is used as-is.
+_raw_chroma_path = os.environ.get("CHROMA_PATH", "")
+if _raw_chroma_path:
+    _p = Path(_raw_chroma_path)
+    CHROMA_PATH = str(_p if _p.is_absolute() else Path(__file__).parent / _p)
+else:
+    CHROMA_PATH = str(Path(__file__).parent / "chroma_db")
 
 _KG_DIR      = Path(__file__).parent.parent
 _KG_PKL_FILE = os.environ.get("KG_PKL_FILE", "triage_knowledge_graph_enriched.pkl")
