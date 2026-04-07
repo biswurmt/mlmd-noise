@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-build_vector_db_chroma.py — Build and query a local ChromaDB vector database
-from filtered medical guidelines using local MedEmbed / MedEIR embeddings
+build_vector_db_chroma.py — Embed KG nodes from triage_knowledge_graph_enriched.pkl
+into a local ChromaDB collection using local MedEmbed / MedEIR embeddings
 (sentence-transformers, no API key required).
 
+Each node is embedded as a short natural-language passage, enabling semantic
+entity-linking from free-text clinical terms to KG nodes.
+
 Index usage:
-    python build_vector_db_chroma.py                    # full combined dataset
-    python build_vector_db_chroma.py --source cma       # gauge run: CMA only (~86 docs)
-    python build_vector_db_chroma.py --parquet PATH     # pre-filtered parquet
+    python build_vector_db_chroma.py                        # default PKL path
+    python build_vector_db_chroma.py --graph-pkl path.pkl   # custom graph
+    python build_vector_db_chroma.py --force-rebuild        # drop and re-index
+    python build_vector_db_chroma.py --dry-run              # print texts only
 
 Query usage:
-    python build_vector_db_chroma.py --query "ST elevation myocardial infarction" --n 5
-    python build_vector_db_chroma.py --query "scrotal pain sudden onset" --test testicular_ultrasound
+    python build_vector_db_chroma.py --query "chest pain diaphoresis"
+    python build_vector_db_chroma.py --query "wrist fracture" --type Symptom --n 5
 
 Model options (set MEDEMBED_MODEL env var):
     abhinand/MedEmbed-small-v0.1    384-dim  ~340 MB  fastest
@@ -21,9 +25,8 @@ Model options (set MEDEMBED_MODEL env var):
 """
 
 import argparse
-import json
 import os
-import time
+import pickle
 import uuid
 from pathlib import Path
 
@@ -34,17 +37,28 @@ load_dotenv(Path(__file__).parent.parent / ".env", override=False)
 load_dotenv(Path(__file__).parent.parent.parent / ".env", override=False)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-MIN_TEXT_LENGTH     = 200    # chars — drop stub/empty docs
-CHUNK_SIZE          = 2000   # chars ≈ 500 tokens
-CHUNK_OVERLAP       = 200    # chars overlap between consecutive chunks
-COLLECTION_NAME     = "guidelines"
-EMBED_BATCH_SIZE    = 32     # sentences per model.encode() call
-CHROMA_UPSERT_BATCH = 100    # chunks per collection.upsert() call
+KG_COLLECTION_NAME = "kg_nodes"
+EMBED_BATCH_SIZE   = 32    # sentences per model.encode() call
+CHROMA_UPSERT_BATCH = 100  # nodes per collection.upsert() call
 
 MEDEMBED_MODEL = os.environ.get("MEDEMBED_MODEL", "abhinand/MedEmbed-large-v0.1")
 CHROMA_PATH    = os.environ.get("CHROMA_PATH", str(Path(__file__).parent / "chroma_db"))
 
-DATA_PATH = Path(__file__).parent.parent / "data" / "guidelines_filtered" / "combined"
+_KG_DIR      = Path(__file__).parent.parent
+_KG_PKL_FILE = os.environ.get("KG_PKL_FILE", "triage_knowledge_graph_enriched.pkl")
+DEFAULT_PKL  = str(_KG_DIR / _KG_PKL_FILE)
+
+# Node-type prefix mapping — mirrors csv_mapping.py _PREFIX_TO_TYPE
+_PREFIX_TO_TYPE = {
+    "Condition":   "Condition",
+    "Symptom":     "Symptom",
+    "Vital":       "Vital_Sign_Threshold",
+    "Demographic": "Demographic_Factor",
+    "Risk Factor": "Risk_Factor",
+    "Attribute":   "Clinical_Attribute",
+    "MOI":         "Mechanism_of_Injury",
+}
+_EMBEDDABLE_PREFIXES = set(_PREFIX_TO_TYPE.keys())
 
 # ── Lazy-initialized singletons ───────────────────────────────────────────────
 _embed_model       = None   # sentence_transformers.SentenceTransformer
@@ -81,24 +95,52 @@ def _get_collection():
             settings=chromadb.Settings(anonymized_telemetry=False),
         )
         _chroma_collection = client.get_or_create_collection(
-            name=COLLECTION_NAME,
+            name=KG_COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
         print(
-            f"ChromaDB collection '{COLLECTION_NAME}' ready at '{CHROMA_PATH}' "
+            f"ChromaDB collection '{KG_COLLECTION_NAME}' ready at '{CHROMA_PATH}' "
             f"({_chroma_collection.count()} existing points)"
         )
     return _chroma_collection
 
 
-# ── Embedding helpers (symmetric — no passage/query prefix) ───────────────────
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed a list of texts using the local model.
+# ── Text construction ─────────────────────────────────────────────────────────
+def build_node_text(node_id: str, attrs: dict) -> str:
+    """Construct a natural-language passage to embed for a KG node.
 
-    MedEmbed and MedEIR are symmetric bi-encoders: passages and queries are
-    encoded identically (no instruction prefix needed unlike e5-mistral).
-    Pre-normalizing ensures ChromaDB cosine distance = 1 − cos_sim exactly.
+    Format: "{NodeType}: {Label}. Associated tests: {tests}. SNOMED: {code}."
     """
+    prefix, label = node_id.split(": ", 1)
+    node_type_human = attrs.get("type", prefix).replace("_", " ")
+
+    parts = [f"{node_type_human}: {label}"]
+
+    te = attrs.get("test_evidence") or []
+    test_names = [t["test"] for t in te if isinstance(t, dict) and "test" in t]
+    if test_names:
+        parts.append("Associated tests: " + ", ".join(test_names))
+
+    for code_key, code_label in [
+        ("snomed_ca_code", "SNOMED"),
+        ("icd10_code",     "ICD-10"),
+        ("icd10ca_code",   "ICD-10-CA"),
+        ("ebi_open_code",  "EBI"),
+    ]:
+        val = attrs.get(code_key) or ""
+        if val:
+            parts.append(f"{code_label}: {val}")
+
+    synonyms = [s for s in (attrs.get("synonyms") or []) if s]
+    if synonyms:
+        parts.append("Also known as: " + ", ".join(synonyms))
+
+    return ". ".join(parts) + "."
+
+
+# ── Embedding ─────────────────────────────────────────────────────────────────
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embed texts with the local MedEmbed model (symmetric — no prefix needed)."""
     model = _get_embed_model()
     vecs = model.encode(
         texts,
@@ -110,290 +152,208 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return vecs.tolist()
 
 
-def embed_passages(texts: list[str]) -> list[list[float]]:
-    """Embed document chunks at index time — symmetric model, same as embed_texts."""
-    return embed_texts(texts)
-
-
 def embed_query(query_text: str) -> list[float]:
-    """Embed a single query string — symmetric model, no instruction prefix."""
     return embed_texts([query_text])[0]
 
 
-# ── Chunking ──────────────────────────────────────────────────────────────────
-def chunk_text(text: str) -> list[str]:
-    """Split text into overlapping character-based chunks."""
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + CHUNK_SIZE
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= len(text):
-            break
-        start += CHUNK_SIZE - CHUNK_OVERLAP
-    return chunks
-
-
 # ── ChromaDB helpers ──────────────────────────────────────────────────────────
-def _chunk_id(chunk_key: str) -> str:
-    """Deterministic string ID from a chunk key — enables idempotent upserts."""
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk_key))
+def _node_id_to_chroma_id(node_id: str) -> str:
+    """Deterministic string ID from a node_id — enables idempotent upserts."""
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, node_id))
 
 
-def _sanitize_metadata(raw: dict) -> dict:
-    """Coerce all values to ChromaDB-safe scalar types (str/int/float/bool).
-
-    ChromaDB rejects None, lists, dicts, and other complex types in metadata.
-    """
-    safe = {}
-    for k, v in raw.items():
-        if isinstance(v, (str, int, float, bool)):
-            safe[k] = v
-        elif v is None:
-            safe[k] = ""
-        else:
-            safe[k] = json.dumps(v)
-    return safe
-
-
-def _get_indexed_doc_ids() -> set[str]:
-    """Return the set of doc_ids already present in the ChromaDB collection."""
+def _get_indexed_node_ids() -> set[str]:
+    """Return the set of node_ids already present in the ChromaDB collection."""
     collection = _get_collection()
     if collection.count() == 0:
         return set()
-    print("  Fetching existing doc_ids for resume detection ...")
+    print("  Fetching existing node_ids for resume detection ...")
     result = collection.get(include=["metadatas"])
-    return {m["doc_id"] for m in result["metadatas"] if "doc_id" in m}
+    return {m["node_id"] for m in result["metadatas"] if "node_id" in m}
 
 
 # ── Query ─────────────────────────────────────────────────────────────────────
-def _fetch_surrounding_chunks(doc_id: str, chunk_index: int, window: int = 1) -> str:
-    """Fetch chunks ±window around a matched chunk from the same document.
-
-    Replaces Qdrant's scroll() + Range filter. ChromaDB's $and compound
-    filter handles the doc_id equality + chunk_index range conditions.
-    """
-    collection = _get_collection()
-    low  = max(0, chunk_index - window)
-    high = chunk_index + window
-
-    result = collection.get(
-        where={
-            "$and": [
-                {"doc_id":      {"$eq":  doc_id}},
-                {"chunk_index": {"$gte": low}},
-                {"chunk_index": {"$lte": high}},
-            ]
-        },
-        include=["metadatas", "documents"],
-    )
-
-    pairs = sorted(
-        zip(result["metadatas"], result["documents"]),
-        key=lambda x: x[0].get("chunk_index", 0),
-    )
-    return " ".join(doc for _, doc in pairs)
-
-
-def query_guidelines(
+def query_kg_nodes(
     query_text: str,
     n_results: int = 5,
-    diagnostic_test: str = None,
-    context_window: int = 1,
+    node_type: str = None,
 ) -> list[dict]:
-    """Return top-N guideline chunks semantically relevant to query_text.
-
-    Each result is expanded with surrounding chunks for fuller context.
-    Identical public signature to build_vector_db.query_guidelines.
+    """Return KG nodes semantically closest to query_text.
 
     Args:
-        query_text:      Natural-language clinical query.
-        n_results:       Number of results to return.
-        diagnostic_test: Optional substring filter on the diagnostic_tests field
-                         (e.g. 'ecg', 'testicular_ultrasound'). ChromaDB has no
-                         native substring operator, so results are oversampled
-                         and post-filtered in Python.
-        context_window:  Chunks before/after each hit to include (default: 1).
+        query_text: Free-text clinical term or phrase to match.
+        n_results:  Number of results to return.
+        node_type:  Optional exact filter on node_type
+                    (e.g. 'Symptom', 'Condition', 'Vital_Sign_Threshold').
 
     Returns:
-        List of dicts: score, matched_text, context, title, source, url,
-                       diagnostic_tests.
+        List of dicts: score, node_id, label, node_type, text,
+                       snomed_ca_code, icd10_code, icd10ca_code, ebi_open_code.
     """
     collection = _get_collection()
     total = collection.count()
     if total == 0:
         return []
 
-    # Oversample when filtering so post-filter has enough candidates
-    fetch_n = min(n_results * 4 if diagnostic_test else n_results, total)
-
-    response = collection.query(
+    query_kwargs = dict(
         query_embeddings=[embed_query(query_text)],
-        n_results=fetch_n,
+        n_results=min(n_results, total),
         include=["metadatas", "documents", "distances"],
     )
+    if node_type:
+        query_kwargs["where"] = {"node_type": {"$eq": node_type}}
+
+    response = collection.query(**query_kwargs)
 
     results = []
-    # ChromaDB returns lists-of-lists (batch API); unwrap single-query response
     for meta, doc, dist in zip(
         response["metadatas"][0],
         response["documents"][0],
         response["distances"][0],
     ):
-        # ChromaDB cosine distance = 1 − cosine_similarity → convert to similarity
-        score       = 1.0 - dist
-        doc_id      = meta.get("doc_id", "")
-        chunk_index = meta.get("chunk_index", 0)
-        context     = _fetch_surrounding_chunks(doc_id, chunk_index, window=context_window)
         results.append(
             {
-                "score":            score,
-                "matched_text":     doc,
-                "context":          context,
-                "title":            meta.get("title", ""),
-                "source":           meta.get("source", ""),
-                "url":              meta.get("url", ""),
-                "diagnostic_tests": meta.get("diagnostic_tests", ""),
+                "score":          1.0 - dist,   # cosine distance → similarity
+                "node_id":        meta.get("node_id", ""),
+                "label":          meta.get("label", ""),
+                "node_type":      meta.get("node_type", ""),
+                "text":           doc,
+                "snomed_ca_code": meta.get("snomed_ca_code", ""),
+                "icd10_code":     meta.get("icd10_code", ""),
+                "icd10ca_code":   meta.get("icd10ca_code", ""),
+                "ebi_open_code":  meta.get("ebi_open_code", ""),
             }
         )
-
-    # Post-filter by diagnostic_test substring (ChromaDB has no MatchText operator)
-    if diagnostic_test:
-        results = [
-            r for r in results
-            if diagnostic_test.lower() in r["diagnostic_tests"].lower()
-        ]
-
-    return results[:n_results]
+    return results
 
 
 # ── Indexing ──────────────────────────────────────────────────────────────────
-def build_index(source_filter: str = None, parquet_path: str = None):
-    """Load, filter, chunk, embed, and upsert guidelines into ChromaDB.
+def build_kg_index(
+    graph_pkl_path: str = DEFAULT_PKL,
+    force_rebuild: bool = False,
+    dry_run: bool = False,
+):
+    """Load the KG PKL, embed all embeddable nodes, and upsert into ChromaDB.
 
     Args:
-        source_filter: Restrict to a single source (e.g. 'cma'). Only used
-                       when loading from the full Arrow dataset.
-        parquet_path:  Path to a pre-filtered parquet file. Skips the Arrow
-                       dataset load and the min-length/dedup filters.
+        graph_pkl_path: Path to the serialized NetworkX DiGraph PKL.
+        force_rebuild:  Drop the existing collection and re-index from scratch.
+        dry_run:        Print the first 10 node texts and exit — no DB calls.
     """
-    import pandas as pd
+    print(f"Loading Knowledge Graph from: {graph_pkl_path}")
+    with open(graph_pkl_path, "rb") as f:
+        kg = pickle.load(f)
+    print(f"Graph loaded: {kg.number_of_nodes()} nodes, {kg.number_of_edges()} edges.")
 
-    # 1. Load dataset
-    if parquet_path:
-        print(f"Loading pre-filtered dataset from {parquet_path} ...")
-        df = pd.read_parquet(parquet_path)
-        print(f"Loaded {len(df)} docs (pre-filtered)")
-    else:
-        from datasets import load_from_disk
-        print(f"Loading dataset from {DATA_PATH} ...")
-        ds = load_from_disk(str(DATA_PATH))
-        df = ds.to_pandas()
-        print(f"Loaded {len(df)} docs")
+    # Filter to embeddable node types
+    embeddable: list[tuple[str, dict]] = []
+    for node_id in kg.nodes:
+        node_str = str(node_id)
+        for prefix in _EMBEDDABLE_PREFIXES:
+            if node_str.startswith(f"{prefix}: "):
+                embeddable.append((node_str, dict(kg.nodes[node_id])))
+                break
 
-        # 2. Filter: minimum text length
-        before = len(df)
-        df = df[df["clean_text"].str.len() >= MIN_TEXT_LENGTH]
-        print(f"Min length filter ({MIN_TEXT_LENGTH} chars): {before} → {len(df)} docs")
+    print(f"Embeddable nodes: {len(embeddable)} / {kg.number_of_nodes()}")
 
-        # 3. Filter: deduplicate by title
-        before = len(df)
-        df = df.drop_duplicates(subset=["title"], keep="first")
-        print(f"Dedup by title: {before} → {len(df)} docs")
-
-    # 4. Optional source filter for gauge runs
-    if source_filter:
-        before = len(df)
-        df = df[df["source"].str.lower() == source_filter.lower()]
-        print(f"Source filter '{source_filter}': {before} → {len(df)} docs")
-
-    if df.empty:
-        print("No documents after filtering — nothing to index.")
+    if dry_run:
+        print("\n--- Dry run: sample node texts ---")
+        for node_id, attrs in embeddable[:10]:
+            print(f"  {node_id!r}")
+            print(f"    → {build_node_text(node_id, attrs)}\n")
+        if len(embeddable) > 10:
+            print(f"  ... and {len(embeddable) - 10} more nodes.")
         return
 
-    # 5. Fetch already-indexed doc_ids to enable safe resume
-    indexed_doc_ids = _get_indexed_doc_ids()
-    if indexed_doc_ids:
-        print(f"  {len(indexed_doc_ids)} doc(s) already indexed — will skip.")
+    # Force rebuild: drop and recreate the collection
+    if force_rebuild:
+        import chromadb
+        client = chromadb.PersistentClient(
+            path=CHROMA_PATH,
+            settings=chromadb.Settings(anonymized_telemetry=False),
+        )
+        try:
+            client.delete_collection(KG_COLLECTION_NAME)
+            print(f"Deleted existing collection '{KG_COLLECTION_NAME}' for rebuild.")
+        except Exception:
+            pass
+        global _chroma_collection
+        _chroma_collection = None  # force re-init
 
-    # 6. Stream through docs: chunk → embed → upsert without holding all in memory
-    print(f"Streaming {len(df)} docs → chunking, embedding, upserting ...")
     collection = _get_collection()
+
+    # Resume: skip already-indexed nodes
+    already_indexed = set() if force_rebuild else _get_indexed_node_ids()
+    if already_indexed:
+        print(f"  {len(already_indexed)} node(s) already indexed — will skip.")
+
+    # Build list of (chroma_id, text, payload) for nodes not yet indexed
+    to_index: list[tuple[str, str, dict]] = []
+    for node_id, attrs in embeddable:
+        if node_id in already_indexed:
+            continue
+        prefix = node_id.split(": ", 1)[0]
+        label = node_id[len(prefix) + 2:]
+        node_type = _PREFIX_TO_TYPE.get(prefix, prefix)
+        text = build_node_text(node_id, attrs)
+        payload = {
+            "node_id":        node_id,
+            "label":          label,
+            "node_type":      node_type,
+            "snomed_ca_code": str(attrs.get("snomed_ca_code") or ""),
+            "icd10_code":     str(attrs.get("icd10_code")     or ""),
+            "icd10ca_code":   str(attrs.get("icd10ca_code")   or ""),
+            "ebi_open_code":  str(attrs.get("ebi_open_code")  or ""),
+        }
+        to_index.append((_node_id_to_chroma_id(node_id), text, payload))
+
+    if not to_index:
+        print("Nothing to index — all nodes already present.")
+        return
+
+    print(f"Embedding and upserting {len(to_index)} nodes ...")
     indexed = 0
-    t_start = time.time()
-    pending: list[tuple[str, str, dict]] = []  # (chunk_id, chunk_text, payload)
-
-    def _flush(batch: list[tuple[str, str, dict]], total_so_far: int) -> int:
-        chunk_ids, chunk_texts, payloads = zip(*batch)
-        vectors       = embed_passages(list(chunk_texts))
-        safe_payloads = [_sanitize_metadata(p) for p in payloads]
+    for batch_start in range(0, len(to_index), CHROMA_UPSERT_BATCH):
+        batch = to_index[batch_start : batch_start + CHROMA_UPSERT_BATCH]
+        chroma_ids, texts, payloads = zip(*batch)
+        vectors = embed_texts(list(texts))
         collection.upsert(
-            ids=list(chunk_ids),
+            ids=list(chroma_ids),
             embeddings=vectors,
-            documents=list(chunk_texts),
-            metadatas=safe_payloads,
+            documents=list(texts),
+            metadatas=list(payloads),
         )
-        n       = len(chunk_ids)
-        elapsed = time.time() - t_start
-        rate    = (total_so_far + n) / elapsed if elapsed > 0 else 0
-        print(
-            f"  [{total_so_far + n}] upserted — "
-            f"{elapsed:.1f}s elapsed, {rate:.1f} chunks/s",
-            flush=True,
-        )
-        return n
+        indexed += len(batch)
+        print(f"  [{indexed}/{len(to_index)}] upserted", flush=True)
 
-    for doc_num, (_, row) in enumerate(df.iterrows(), 1):
-        doc_id = str(row["id"])
-        if doc_id in indexed_doc_ids:
-            continue  # already fully indexed — skip
-
-        text_chunks = chunk_text(str(row["clean_text"]))
-        for i, chunk in enumerate(text_chunks):
-            payload = {
-                "doc_id":           doc_id,
-                "title":            str(row.get("title",            ""))[:500],
-                "source":           str(row.get("source",           ""))[:200],
-                "url":              str(row.get("url",               ""))[:500],
-                "overview":         str(row.get("overview",         ""))[:1000],
-                "diagnostic_tests": str(row.get("diagnostic_tests", "")),
-                "chunk_index":      i,
-                # Note: chunk text is stored in ChromaDB's native documents field,
-                # not duplicated here in metadata.
-            }
-            pending.append((_chunk_id(f"{doc_id}_chunk_{i}"), chunk, payload))
-
-        if len(pending) >= CHROMA_UPSERT_BATCH:
-            indexed += _flush(pending[:CHROMA_UPSERT_BATCH], indexed)
-            pending = pending[CHROMA_UPSERT_BATCH:]
-
-        if doc_num % 100 == 0:
-            print(f"  docs processed: {doc_num}/{len(df)}", flush=True)
-
-    # Flush remainder
-    while pending:
-        batch, pending = pending[:CHROMA_UPSERT_BATCH], pending[CHROMA_UPSERT_BATCH:]
-        indexed += _flush(batch, indexed)
-
-    print(f"\nDone. {indexed} chunks indexed in {time.time() - t_start:.1f}s", flush=True)
+    print(f"\nDone. {indexed} nodes indexed in '{KG_COLLECTION_NAME}'.")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="Build or query the guidelines vector DB (ChromaDB + local MedEmbed)"
+        description="Embed KG nodes into ChromaDB using local MedEmbed / MedEIR."
     )
     parser.add_argument(
-        "--source",
-        metavar="SOURCE",
-        help="Restrict indexing to one source (e.g. cma, nice, pubmed). Default: all.",
+        "--graph-pkl",
+        default=DEFAULT_PKL,
+        metavar="PATH",
+        help=f"Path to the KG pickle file (default: {_KG_PKL_FILE}).",
+    )
+    parser.add_argument(
+        "--force-rebuild",
+        action="store_true",
+        help="Delete and re-index the kg_nodes collection from scratch.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the first 10 node texts and exit without writing to ChromaDB.",
     )
     parser.add_argument(
         "--query",
         metavar="TEXT",
-        help="Query the DB instead of building it.",
+        help="Query the collection instead of building it.",
     )
     parser.add_argument(
         "--n",
@@ -403,33 +363,27 @@ def main():
         help="Number of query results to return (default: 5).",
     )
     parser.add_argument(
-        "--test",
-        metavar="TEST",
-        help="Filter query results by diagnostic test (e.g. ecg, arm_xray).",
-    )
-    parser.add_argument(
-        "--parquet",
-        metavar="PATH",
-        help="Path to a pre-filtered parquet file to index (skips full dataset load).",
+        "--type",
+        metavar="NODE_TYPE",
+        help="Filter query results by node_type (e.g. Symptom, Condition).",
     )
     args = parser.parse_args()
 
     if args.query:
-        results = query_guidelines(
-            args.query, n_results=args.n, diagnostic_test=args.test
-        )
+        results = query_kg_nodes(args.query, n_results=args.n, node_type=args.type)
         print(f"\nTop {len(results)} results for: '{args.query}'\n{'─' * 60}")
         for i, r in enumerate(results, 1):
-            print(
-                f"\n[{i}] score={r['score']:.4f}  "
-                f"source={r['source']}  tests={r['diagnostic_tests']}"
-            )
-            print(f"    title:   {r['title'][:80]}")
-            print(f"    url:     {r['url'][:80]}")
-            print(f"    matched: {r['matched_text'][:200]}...")
-            print(f"    context: {r['context'][:500]}...")
+            print(f"\n[{i}] score={r['score']:.4f}  type={r['node_type']}")
+            print(f"    node_id: {r['node_id']}")
+            print(f"    text:    {r['text']}")
+            if r["snomed_ca_code"]:
+                print(f"    SNOMED:  {r['snomed_ca_code']}")
     else:
-        build_index(source_filter=args.source, parquet_path=args.parquet)
+        build_kg_index(
+            graph_pkl_path=args.graph_pkl,
+            force_rebuild=args.force_rebuild,
+            dry_run=args.dry_run,
+        )
 
 
 if __name__ == "__main__":

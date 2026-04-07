@@ -1,23 +1,23 @@
 # Guidelines Vector Database
 
-Two parallel scripts for building and querying a semantic vector index of medical guidelines. Both expose the same `query_guidelines()` API so they are interchangeable as backends.
+Two scripts for building and querying a semantic vector index. Both live in this folder and share the same ChromaDB / Qdrant store path.
 
-| Script | Embedding model | Vector store | Requires |
-|--------|----------------|--------------|---------|
-| `build_vector_db.py` | Nebius e5-mistral-7b-instruct (4096-dim, cloud) | Qdrant Cloud | `NEBIUS_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY` |
-| `build_vector_db_chroma.py` | MedEmbed / MedEIR (local, no key) | ChromaDB (local disk) | None — models download on first run |
+| Script | What gets embedded | Embedding model | Vector store |
+|--------|-------------------|----------------|--------------|
+| `build_vector_db_chroma.py` | KG nodes from `triage_knowledge_graph_enriched.pkl` | MedEmbed / MedEIR (local) | ChromaDB (local disk) |
+| `build_vector_db.py` | `epfl-llm/guidelines` Arrow dataset chunks | Nebius e5-mistral-7b-instruct (cloud) | Qdrant Cloud *(legacy)* |
+
+`build_vector_db_chroma.py` is the active script. It embeds every node in the enriched knowledge graph — Symptoms, Conditions, Vital Sign Thresholds, Demographic Factors, Risk Factors, Clinical Attributes, and Mechanisms of Injury — into a local ChromaDB collection called `kg_nodes`.
 
 ---
 
-## `build_vector_db_chroma.py` — Local Stack
+## `build_vector_db_chroma.py`
 
 ### Dependencies
 
 ```bash
 pip install chromadb sentence-transformers torch
 ```
-
-> The Pylance "could not be resolved" warnings for `torch`, `sentence_transformers`, and `chromadb` disappear once the packages are installed into your active environment.
 
 ### Configuration (`.env`)
 
@@ -31,87 +31,101 @@ MEDEMBED_MODEL=abhinand/MedEmbed-large-v0.1
 
 # Local path for the ChromaDB on-disk store
 CHROMA_PATH=./knowledge-graphs/vector_db/chroma_db
+
+# KG pickle to embed (default: triage_knowledge_graph_enriched.pkl)
+KG_PKL_FILE=triage_knowledge_graph_enriched.pkl
 ```
 
-No Qdrant or Nebius credentials are needed. Models are downloaded from HuggingFace into `~/.cache/huggingface/` on first run; subsequent runs use the local cache.
+No Qdrant or Nebius credentials needed. Models download from HuggingFace into `~/.cache/huggingface/` on first run.
+
+### Device selection
+
+Auto-detected in priority order: **MPS** (Apple Silicon) → **CUDA** (NVIDIA GPU) → **CPU**.
+
+---
 
 ### Usage
 
-Run all commands from `knowledge-graphs/vector_db/`.
+Run from `knowledge-graphs/vector_db/` or supply a full path with `--graph-pkl`.
 
-**Build the index (full dataset):**
+**Build the index:**
 ```bash
 python build_vector_db_chroma.py
 ```
 
-**Gauge run (CMA source only, ~86 docs — good for testing):**
+**Rebuild from scratch (drops existing collection):**
 ```bash
-python build_vector_db_chroma.py --source cma
+python build_vector_db_chroma.py --force-rebuild
 ```
 
-**Index a pre-filtered parquet file:**
+**Preview node texts without writing to ChromaDB:**
 ```bash
-python build_vector_db_chroma.py --parquet guidelines_remaining.parquet
+python build_vector_db_chroma.py --dry-run
+```
+
+**Use a different PKL:**
+```bash
+python build_vector_db_chroma.py --graph-pkl ../../knowledge-graphs/triage_knowledge_graph_enriched.pkl
 ```
 
 **Query:**
 ```bash
-python build_vector_db_chroma.py --query "ST elevation myocardial infarction" --n 5
+python build_vector_db_chroma.py --query "chest pain with diaphoresis" --n 5
 ```
 
-**Query with diagnostic test filter:**
+**Query filtered by node type:**
 ```bash
-python build_vector_db_chroma.py --query "scrotal pain sudden onset" --test testicular_ultrasound --n 3
+python build_vector_db_chroma.py --query "wrist fracture after fall" --type Symptom
+python build_vector_db_chroma.py --query "diabetes mellitus" --type Condition
 ```
 
-Indexing is resumable — already-indexed documents are skipped automatically on re-runs.
+Valid `--type` values: `Symptom`, `Condition`, `Vital_Sign_Threshold`, `Demographic_Factor`, `Risk_Factor`, `Clinical_Attribute`, `Mechanism_of_Injury`.
 
-### Device selection
-
-The script auto-detects the best available device in priority order: **MPS** (Apple Silicon) → **CUDA** (NVIDIA GPU) → **CPU**. No configuration needed.
-
-### Switching models
-
-Change `MEDEMBED_MODEL` in `.env` and re-run `build_index`. If the new model has a different embedding dimension, delete the existing `chroma_db/` folder first — ChromaDB will error if the stored dimension does not match the new model's output.
-
-```bash
-rm -rf knowledge-graphs/vector_db/chroma_db
-python build_vector_db_chroma.py --source cma  # re-index
-```
+Indexing is resumable — already-indexed nodes are detected from ChromaDB metadata and skipped on re-runs.
 
 ---
 
-## Key differences from the Qdrant stack
+### What gets embedded
 
-### Symmetric embeddings
-MedEmbed and MedEIR are **symmetric bi-encoders** — passages and queries are encoded identically. The asymmetric `"passage: "` / `"Instruct: ..."` prefixes used by e5-mistral are not needed and are not applied.
+Each KG node is converted to a short natural-language passage before embedding:
 
-### `diagnostic_test` filtering
-ChromaDB has no native substring operator (equivalent to Qdrant's `MatchText`). The `diagnostic_test` filter in `query_guidelines()` works by oversampling results (4×) and post-filtering in Python. Callers pass the same argument as before; behavior is equivalent.
+```
+Symptom: Chest Pain. Associated tests: ECG. SNOMED: 29857009. ICD-10: R07.9.
+```
 
-### Text storage
-Chunk text is stored in ChromaDB's native `documents` field rather than duplicated in the metadata payload. The `query_guidelines()` return dict uses the same keys as the Qdrant version (`matched_text`, `context`, `title`, `source`, `url`, `diagnostic_tests`, `score`).
+The passage includes:
+- Node type + label
+- Associated diagnostic tests (from `test_evidence` attribute)
+- Ontology codes: SNOMED CT CA, ICD-10, ICD-10-CA, EBI/OLS
 
-### ChromaDB distance convention
-ChromaDB returns cosine **distance** (0 = identical, 2 = opposite) for `hnsw:space: cosine`. The script converts this to **similarity** (`score = 1.0 − distance`) so returned scores are in the same [0, 1] range as the Qdrant stack.
+Only the 7 embeddable node types are indexed (Test nodes and edges are excluded).
 
 ---
 
-## Python API
-
-Both scripts expose the same function signature:
+### Python API
 
 ```python
-from build_vector_db_chroma import query_guidelines
+from build_vector_db_chroma import query_kg_nodes
 
-results = query_guidelines(
-    query_text="wrist pain after fall on outstretched hand",
+results = query_kg_nodes(
+    query_text="sudden scrotal pain",
     n_results=5,
-    diagnostic_test="arm_xray",   # optional substring filter
-    context_window=1,              # chunks before/after each hit to include
+    node_type="Symptom",   # optional
 )
 
 for r in results:
-    print(r["score"], r["title"])
-    print(r["context"])
+    print(r["score"], r["node_id"], r["snomed_ca_code"])
+```
+
+Each result dict contains: `score`, `node_id`, `label`, `node_type`, `text`, `snomed_ca_code`, `icd10_code`, `icd10ca_code`, `ebi_open_code`.
+
+---
+
+### Switching models
+
+Change `MEDEMBED_MODEL` in `.env`. If the new model has a different output dimension, delete `chroma_db/` and re-index:
+
+```bash
+rm -rf knowledge-graphs/vector_db/chroma_db
+python build_vector_db_chroma.py
 ```
