@@ -241,6 +241,8 @@ data-processing/*.json
 *.xlsx
 *.xls
 !data-processing/student_data_enriched_validation.csv
+!data-processing/student_data_enriched_graphonly_validation.csv
+!data-processing/student_data_enriched_graphonly_full_validation.csv
 
 
 # Frontend dependencies and build output
