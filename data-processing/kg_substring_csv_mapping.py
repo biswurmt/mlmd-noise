@@ -202,6 +202,7 @@ def map_diagnoses_with_llm(
     csv_output_path: str,
     row_limit: int | None = None,
     resume: bool = False,
+    min_nodes: int = 1,
 ):
     # --- Load Graph & Build Node Catalogue ---
     print("Loading Knowledge Graph...")
@@ -298,13 +299,13 @@ def map_diagnoses_with_llm(
         return " | ".join(f"{m['label']} ({m['node_type']})" for m in matches)
 
     def format_potential_tests(matches: list[dict]) -> str:
-        seen: set[str] = set()
-        tests: list[str] = []
+        # Count how many distinct matched nodes recommend each test
+        test_vote_count: dict[str, int] = {}
         for m in matches:
             for t in m.get("tests", []):
-                if t not in seen:
-                    seen.add(t)
-                    tests.append(t)
+                test_vote_count[t] = test_vote_count.get(t, 0) + 1
+        # Only include tests recommended by at least min_nodes matched nodes
+        tests = [t for t, count in test_vote_count.items() if count >= min_nodes]
         return ", ".join(tests) if tests else "No linked tests found"
 
     df['matched_graph_nodes'] = df['dx'].map(
@@ -316,7 +317,7 @@ def map_diagnoses_with_llm(
 
     # --- Save Output ---
     df.to_csv(csv_output_path, index=False)
-    print(f"\nSuccess! Saved enriched data to '{csv_output_path}'")
+    print(f"\nSuccess! Saved enriched data to '{csv_output_path}' (min_nodes={min_nodes})")
 
     # --- Validation (always runs when ground-truth columns are present) ---
     missing = [col for col in TEST_COLUMN_MAP.values() if col not in df.columns]
@@ -367,6 +368,14 @@ if __name__ == "__main__":
             "are skipped; only new ones are processed."
         ),
     )
+    parser.add_argument(
+        "--min-nodes", type=int, default=1, metavar="N",
+        help=(
+            "Minimum number of matched KG nodes that must recommend a test before it is "
+            "included in potential_tests. Use 2+ to reduce false positives from generic "
+            "symptoms (e.g. 'nausea') that match the graph broadly. Default: 1 (original behaviour)."
+        ),
+    )
     args = parser.parse_args()
 
     result_df = map_diagnoses_with_llm(
@@ -375,6 +384,7 @@ if __name__ == "__main__":
         args.output_csv,
         row_limit=args.limit,
         resume=args.resume,
+        min_nodes=args.min_nodes,
     )
 
     print("\n--- Output Preview ---")
