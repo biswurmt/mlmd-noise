@@ -119,12 +119,21 @@ def _get_collection():
 def build_node_text(node_id: str, attrs: dict) -> str:
     """Construct a natural-language passage to embed for a KG node.
 
-    Format: "{NodeType}: {Label}. Associated tests: {tests}. SNOMED: {code}."
-    """
-    prefix, label = node_id.split(": ", 1)
-    node_type_human = attrs.get("type", prefix).replace("_", " ")
+    The node type is intentionally excluded from the embedded text and stored
+    only in ChromaDB metadata.  Including the type prefix (e.g. "Symptom:")
+    shifts the embedding away from the pure clinical concept, which suppresses
+    cosine similarity when queries are plain clinical terms (e.g. "fever"
+    against "Symptom: Fever" scores ~0.75 instead of ~1.0).
 
-    parts = [f"{node_type_human}: {label}"]
+    Format: "{Label}. Also known as: {synonyms}. Associated tests: {tests}. SNOMED: {code}."
+    """
+    _, label = node_id.split(": ", 1)
+
+    parts = [label]
+
+    synonyms = [s for s in (attrs.get("synonyms") or []) if s]
+    if synonyms:
+        parts.append("Also known as: " + ", ".join(synonyms))
 
     te = attrs.get("test_evidence") or []
     test_names = [t["test"] for t in te if isinstance(t, dict) and "test" in t]
@@ -140,10 +149,6 @@ def build_node_text(node_id: str, attrs: dict) -> str:
         val = attrs.get(code_key) or ""
         if val:
             parts.append(f"{code_label}: {val}")
-
-    synonyms = [s for s in (attrs.get("synonyms") or []) if s]
-    if synonyms:
-        parts.append("Also known as: " + ", ".join(synonyms))
 
     return ". ".join(parts) + "."
 
