@@ -37,6 +37,7 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+import json
 
 try:
     from tqdm import tqdm
@@ -200,6 +201,10 @@ def _save_partial(
     df["potential_tests"] = df["dx"].map(
         lambda dx: _format_potential_tests(mapping_dictionary.get(dx, []), min_nodes)
     )
+
+    # Instead of your custom pipe format, dump the data as JSON
+    df["matches_json"] = df["dx"].map(lambda dx: json.dumps(mapping_dictionary.get(dx, [])))
+
     df.to_csv(path, index=False)
 
 
@@ -405,6 +410,11 @@ def map_diagnoses_semantic(
         lambda dx: _format_potential_tests(mapping_dictionary.get(dx, []), min_nodes)
     )
 
+    # ADD THIS LINE HERE:
+    df["matches_json"] = df["dx"].map(
+        lambda dx: json.dumps(mapping_dictionary.get(dx, []))
+    )
+    
     df.to_csv(csv_output_path, index=False)
     print(f"\nSaved enriched data to '{csv_output_path}' (min_nodes={min_nodes})")
 
