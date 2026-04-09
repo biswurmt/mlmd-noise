@@ -250,6 +250,27 @@
     "source": "ACR"
   },
   {
+    "raw_symptom": "radius fracture",
+    "node_type": "Condition",
+    "condition": "Wrist Fracture",
+    "test": "Arm X-Ray",
+    "source": "ACR"
+  },
+  {
+    "raw_symptom": "ulna fracture",
+    "node_type": "Condition",
+    "condition": "Arm Fracture",
+    "test": "Arm X-Ray",
+    "source": "ACR"
+  },
+  {
+    "raw_symptom": "forearm fracture",
+    "node_type": "Condition",
+    "condition": "Arm Fracture",
+    "test": "Arm X-Ray",
+    "source": "ACR"
+  },
+  {
     "_comment": "PATHWAY 4: Appendix/Abdominal Ultrasound \u2014 ACR + NICE | Acute Appendicitis, Ovarian Torsion"
   },
   {
@@ -272,20 +293,6 @@
     "condition": "Abdominal Aortic Aneurysm",
     "test": "Abdominal Ultrasound",
     "source": "ACR"
-  },
-  {
-    "raw_symptom": "nausea vomiting",
-    "node_type": "Symptom",
-    "condition": "Acute Appendicitis",
-    "test": "Appendix Ultrasound",
-    "source": "ACR"
-  },
-  {
-    "raw_symptom": "fever > 38.0",
-    "node_type": "Vital_Sign_Threshold",
-    "condition": "Acute Appendicitis",
-    "test": "Appendix Ultrasound",
-    "source": "NICE"
   },
   {
     "raw_symptom": "rebound tenderness",
