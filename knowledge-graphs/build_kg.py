@@ -74,6 +74,7 @@ _trial_cache: dict = {}
 
 # Node-type prefix mapping (used as the node ID prefix in the graph)
 _NODE_PREFIX = {
+    "Condition":            "Condition",
     "Symptom":              "Symptom",
     "Vital_Sign_Threshold": "Vital",
     "Demographic_Factor":   "Demographic",
@@ -245,33 +246,6 @@ def get_open_medical_concept(term):
         print(f"  EBI OLS API error for '{term}': {e}")
         return term, None, []
 
-
-# def get_umls_concept(term, sabs, api_key):
-#     """Query the UMLS REST API for any vocabulary supported by the sabs parameter.
-
-#     Examples:
-#         sabs="LNC"      → LOINC codes for diagnostic tests
-#         sabs="ICD10CM"  → ICD-10-CM codes for conditions
-#     Returns (canonical_name, code) or (term, None) on failure.
-#     """
-#     base_uri = "https://uts-ws.nlm.nih.gov/rest/search/current"
-#     params = {
-#         "string": term,
-#         "sabs": sabs,
-#         "returnIdType": "code",
-#         "apiKey": api_key,
-#     }
-#     try:
-#         response = requests.get(base_uri, params=params)
-#         response.raise_for_status()
-#         results = response.json().get("result", {}).get("results", [])
-#         if results:
-#             best = results[0]
-#             return best["name"], best["ui"]
-#         return term, None
-#     except Exception as e:
-#         print(f"  UMLS ({sabs}) error for '{term}': {e}")
-#         return term, None
 
 def get_umls_concept(term, sabs, api_key):
     """

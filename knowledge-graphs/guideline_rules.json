@@ -20,7 +20,7 @@
   {
     "raw_symptom": "palpitations",
     "node_type": "Symptom",
-    "condition": "Acute Myocardial Infarction",
+    "condition": "Arrhythmia",
     "test": "ECG",
     "source": "AHA/ACC"
   },
@@ -229,7 +229,7 @@
     "source": "ACR"
   },
   {
-    "raw_symptom": "inability to bear weight",
+    "raw_symptom": "inability to actively move arm",
     "node_type": "Clinical_Attribute",
     "condition": "Arm Fracture",
     "test": "Arm X-Ray",
@@ -250,7 +250,28 @@
     "source": "ACR"
   },
   {
-    "_comment": "PATHWAY 4: Appendix/Abdominal Ultrasound \u2014 ACR + NICE | Acute Appendicitis, Ectopic Pregnancy, Ovarian Torsion"
+    "raw_symptom": "radius fracture",
+    "node_type": "Condition",
+    "condition": "Wrist Fracture",
+    "test": "Arm X-Ray",
+    "source": "ACR"
+  },
+  {
+    "raw_symptom": "ulna fracture",
+    "node_type": "Condition",
+    "condition": "Arm Fracture",
+    "test": "Arm X-Ray",
+    "source": "ACR"
+  },
+  {
+    "raw_symptom": "forearm fracture",
+    "node_type": "Condition",
+    "condition": "Arm Fracture",
+    "test": "Arm X-Ray",
+    "source": "ACR"
+  },
+  {
+    "_comment": "PATHWAY 4: Appendix/Abdominal Ultrasound \u2014 ACR + NICE | Acute Appendicitis, Ovarian Torsion"
   },
   {
     "raw_symptom": "periumbilical pain",
@@ -274,20 +295,6 @@
     "source": "ACR"
   },
   {
-    "raw_symptom": "nausea vomiting",
-    "node_type": "Symptom",
-    "condition": "Acute Appendicitis",
-    "test": "Appendix Ultrasound",
-    "source": "ACR"
-  },
-  {
-    "raw_symptom": "fever > 37.3",
-    "node_type": "Vital_Sign_Threshold",
-    "condition": "Acute Appendicitis",
-    "test": "Appendix Ultrasound",
-    "source": "NICE"
-  },
-  {
     "raw_symptom": "rebound tenderness",
     "node_type": "Clinical_Attribute",
     "condition": "Acute Appendicitis",
@@ -304,23 +311,9 @@
   {
     "raw_symptom": "female of childbearing age",
     "node_type": "Demographic_Factor",
-    "condition": "Ectopic Pregnancy",
-    "test": "Appendix Ultrasound",
-    "source": "ACR"
-  },
-  {
-    "raw_symptom": "female of childbearing age",
-    "node_type": "Demographic_Factor",
     "condition": "Ovarian Torsion",
     "test": "Appendix Ultrasound",
     "source": "NICE"
-  },
-  {
-    "raw_symptom": "age < 18",
-    "node_type": "Demographic_Factor",
-    "condition": "Pediatric Assessment",
-    "test": "Appendix Ultrasound",
-    "source": "ACR"
   },
   {
     "raw_symptom": "right lower quadrant pain",
@@ -328,5 +321,19 @@
     "condition": "Acute Appendicitis",
     "test": "Appendix Ultrasound",
     "source": "NICE"
+  },
+  {
+    "raw_symptom": "diffuse abdominal pain",
+    "node_type": "Symptom",
+    "condition": "Abdominal Aortic Aneurysm",
+    "test": "Abdominal Ultrasound",
+    "source": "ACR"
+  },
+  {
+    "raw_symptom": "pulsatile abdominal mass",
+    "node_type": "Symptom",
+    "condition": "Abdominal Aortic Aneurysm",
+    "test": "Abdominal Ultrasound",
+    "source": "ACR"
   }
 ]

@@ -211,6 +211,11 @@ __marimo__/
 # Vector DB indexing checkpoint — tracks resume position, auto-deleted on completion
 knowledge-graphs/vector_db/.index_checkpoint.json
 
+# ChromaDB local store — binary index files, auto-regenerated via build_vector_db_chroma.py
+knowledge-graphs/vector_db/chroma_db/
+*.bin
+*.sqlite3
+
 # ClinGraph data — large CSV files downloaded from Harvard Dataverse, auto-excluded by *.csv
 knowledge-graphs/clingraph_data/
 
