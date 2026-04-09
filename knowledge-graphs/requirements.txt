@@ -1,8 +1,14 @@
+# Python >= 3.10 required (uses match statements and built-in list[str] type hints)
+
 # --- Knowledge Graph Construction ---
 requests
 pandas
 networkx
 python-dotenv
+
+# --- LLM Clients (audit_guidelines.py, kg_audit_agent.py) ---
+openai>=1.0.0           # used for Nebius AI Studio (OpenAI-compatible endpoint)
+azure-identity          # used when LLM_PROVIDER=azure (AzureCliCredential)
 
 # --- Knowledge Graph Visualization ---
 pyvis
@@ -16,7 +22,7 @@ wget
 beautifulsoup4>=4.12.0
 
 # --- Vector DB & Embeddings (legacy Qdrant / Nebius stack) ---
-qdrant-client>=1.9.0   # legacy: used by build_vector_db.py only
+qdrant-client>=1.9.0   # legacy: used by vector_db/build_vector_db.py only
 
 # --- Vector DB & Embeddings (local ChromaDB / MedEmbed stack) ---
 chromadb>=0.5.0
