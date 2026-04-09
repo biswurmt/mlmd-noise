@@ -13,8 +13,8 @@ mlmd-noise/
 │   │   ├── main.py                     # App entry point, CORS, router registration
 │   │   ├── routers/
 │   │   │   ├── chat.py                 # POST /api/chat
-│   │   │   ├── graph.py                # GET  /api/graph
-│   │   │   └── kg.py                   # POST /api/kg/expand
+│   │   │   ├── graph.py                # GET /api/graph, GET /api/tests, POST /api/add_test
+│   │   │   └── kg.py                   # POST /api/add_test (duplicate, not registered)
 │   │   ├── services/
 │   │   │   ├── chat_service.py         # RAG + Semantic Scholar + Kimi-K2.5 chat
 │   │   │   ├── graph_service.py        # KG serialisation for the frontend
