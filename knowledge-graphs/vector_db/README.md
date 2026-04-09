@@ -90,13 +90,16 @@ Indexing is resumable — already-indexed nodes are detected from ChromaDB metad
 Each KG node is converted to a short natural-language passage before embedding:
 
 ```
-Symptom: Chest Pain. Associated tests: ECG. SNOMED: 29857009. ICD-10: R07.9.
+Chest Pain. Also known as: chest discomfort, precordial pain. Associated tests: ECG. SNOMED: 29857009. ICD-10: R07.9.
 ```
 
 The passage includes:
-- Node type + label
+- Label only (node type is **excluded** from the embedded text — see note below)
+- Synonyms, if any (placed immediately after the label for embedding proximity)
 - Associated diagnostic tests (from `test_evidence` attribute)
 - Ontology codes: SNOMED CT CA, ICD-10, ICD-10-CA, EBI/OLS
+
+> **Why is the node type excluded?** Including the type prefix (e.g. `"Symptom: Fever"`) shifts the embedding away from the pure clinical concept. A query of `"fever"` against `"Symptom: Fever"` scores ~0.75 instead of ~1.0. The node type is stored in ChromaDB metadata and remains available for `--type` filtering.
 
 Only the 7 embeddable node types are indexed (Test nodes and edges are excluded).
 
