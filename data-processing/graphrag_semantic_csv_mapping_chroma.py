@@ -9,10 +9,19 @@ Drop-in replacement for graphrag_semantic_csv_mapping.py:
   - Qdrant Cloud             →  ChromaDB local persistent store
   - Graph traversal, validation, and CSV schema are unchanged.
 
-New output column compared to the Qdrant version:
+New output columns compared to the Qdrant version:
   match_scores   Pipe-separated "Label: 0.XX" scores for every matched node,
                  preserving the raw cosine similarity above the threshold for
                  downstream probability-aware use.
+  test_scores    Pipe-separated "Test: aggregate_score" showing the sum of
+                 cosine similarities across all nodes that recommend each test.
+                 Tests are ordered by descending aggregate score.
+
+Negation handling:
+  Matched nodes are discarded when the node label appears in the dx string
+  preceded by a negation word (no, not, denies, without, absent, negative for,
+  rules out) within a 6-token window.
+  Example: "no fever" → Fever node is NOT matched.
 
 Usage:
     python chroma_semantic_csv_mapping.py --input-csv <path> [options]
@@ -23,7 +32,8 @@ Options:
     --graph-pkl          PATH   Knowledge graph PKL (default: from KG_PKL_FILE env)
     --limit              N      Process only first N rows
     --resume                    Skip diagnoses already present in output CSV
-    --min-nodes          N      Min matched nodes to include a test (default: 1)
+    --min-score-sum      F      Min aggregate cosine score for a test to appear in
+                                potential_tests (default: 0.5). Replaces --min-nodes.
     --semantic-top-k     K      Max KG nodes from ChromaDB query (default: 5)
     --semantic-threshold F      Min cosine similarity 0–1 to accept a match (default: 0.50)
     --save-every         N      Checkpoint to disk every N unique diagnoses (default: 10)
@@ -32,6 +42,7 @@ Options:
 import argparse
 import os
 import pickle
+import re
 import sys
 from pathlib import Path
 
@@ -69,9 +80,37 @@ from build_vector_db_chroma import (
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-KG_COLLECTION_NAME = "kg_nodes"
-_SEMANTIC_TOP_K    = 5
-_SEMANTIC_MIN_SIM  = 0.50
+KG_COLLECTION_NAME  = "kg_nodes"
+_SEMANTIC_TOP_K     = 5
+_SEMANTIC_MIN_SIM   = 0.50
+_MIN_SCORE_SUM      = 0.5   # min aggregate cosine score for a test to appear in potential_tests
+
+# ── Negation detection ────────────────────────────────────────────────────────
+_NEGATION_RE = re.compile(
+    r"\b(no|not|denies|denying|without|absent|negative\s+for|rules?\s+out|ruled?\s+out)\b",
+    re.I,
+)
+
+
+def _is_negated(query_text: str, label: str, window: int = 6) -> bool:
+    """Return True if `label` appears in `query_text` preceded by a negation word
+    within `window` tokens — indicating the matched entity should be excluded.
+
+    Examples:
+        _is_negated("no chest pain", "Chest Pain")          → True
+        _is_negated("chest pain", "Chest Pain")             → False
+        _is_negated("chest pain, no diaphoresis", "Chest Pain") → False
+        _is_negated("denies fever and nausea", "Fever")     → True
+    """
+    tokens = re.split(r"\s+", query_text.lower())
+    label_tokens = label.lower().split()
+    n = len(label_tokens)
+    for i in range(len(tokens) - n + 1):
+        if tokens[i : i + n] == label_tokens:
+            window_text = " ".join(tokens[max(0, i - window) : i])
+            if _NEGATION_RE.search(window_text):
+                return True
+    return False
 
 _KG_PKL_FILE = os.environ.get("KG_PKL_FILE", "triage_knowledge_graph_enriched.pkl")
 _DEFAULT_PKL = os.path.join(_kg_dir, _KG_PKL_FILE)
@@ -120,6 +159,11 @@ def get_graph_matches_semantic(
         ):
             score = 1.0 - dist   # cosine distance → cosine similarity
             if score < min_score:
+                continue
+
+            # Skip nodes whose label is negated in the query text
+            # (e.g. "no fever" should not match the Fever node)
+            if _is_negated(raw_dx, meta["label"]):
                 continue
 
             key = f"{meta['node_type']}:{meta['label']}"
@@ -175,20 +219,49 @@ def _format_match_scores(matches: list[dict]) -> str:
     )
 
 
-def _format_potential_tests(matches: list[dict], min_nodes: int) -> str:
-    test_vote_count: dict[str, int] = {}
+def _aggregate_test_scores(matches: list[dict]) -> dict[str, float]:
+    """Compute per-test aggregate cosine similarity across all matched nodes."""
+    test_score_sum: dict[str, float] = {}
     for m in matches:
         for t in m.get("tests", []):
-            test_vote_count[t] = test_vote_count.get(t, 0) + 1
-    tests = [t for t, count in test_vote_count.items() if count >= min_nodes]
+            test_score_sum[t] = test_score_sum.get(t, 0.0) + m.get("score", 0.0)
+    return test_score_sum
+
+
+def _format_potential_tests(matches: list[dict], min_score_sum: float = _MIN_SCORE_SUM) -> str:
+    """Return tests whose aggregate cosine score meets the threshold, ordered by score.
+
+    A score-weighted approach: a node with similarity 0.95 contributes nearly
+    twice as much as one at 0.51, reducing noise from borderline matches.
+    `min_score_sum` defaults to 0.5, equivalent to one moderate-confidence match.
+    """
+    test_score_sum = _aggregate_test_scores(matches)
+    tests = sorted(
+        [t for t, s in test_score_sum.items() if s >= min_score_sum],
+        key=lambda t: -test_score_sum[t],
+    )
     return ", ".join(tests) if tests else "No linked tests found"
+
+
+def _format_test_scores(matches: list[dict]) -> str:
+    """Pipe-separated 'Test: aggregate_score' for every recommended test.
+
+    Stores the sum of cosine similarities across all nodes that recommend
+    each test, enabling downstream threshold tuning without re-running embeddings.
+    Example: "ECG: 1.4946 | Arm X-Ray: 0.6234"
+    """
+    test_score_sum = _aggregate_test_scores(matches)
+    return " | ".join(
+        f"{t}: {s:.4f}"
+        for t, s in sorted(test_score_sum.items(), key=lambda x: -x[1])
+    )
 
 
 # ── Checkpoint helpers ────────────────────────────────────────────────────────
 def _save_partial(
     df: pd.DataFrame,
     mapping_dictionary: dict,
-    min_nodes: int,
+    min_score_sum: float,
     path: str,
 ) -> None:
     df = df.copy()
@@ -199,7 +272,10 @@ def _save_partial(
         lambda dx: _format_match_scores(mapping_dictionary.get(dx, []))
     )
     df["potential_tests"] = df["dx"].map(
-        lambda dx: _format_potential_tests(mapping_dictionary.get(dx, []), min_nodes)
+        lambda dx: _format_potential_tests(mapping_dictionary.get(dx, []), min_score_sum)
+    )
+    df["test_scores"] = df["dx"].map(
+        lambda dx: _format_test_scores(mapping_dictionary.get(dx, []))
     )
 
     # Instead of your custom pipe format, dump the data as JSON
@@ -215,7 +291,7 @@ def map_diagnoses_semantic(
     csv_output_path: str,
     row_limit: int | None = None,
     resume: bool = False,
-    min_nodes: int = 1,
+    min_score_sum: float = _MIN_SCORE_SUM,
     semantic_top_k: int = _SEMANTIC_TOP_K,
     semantic_threshold: float = _SEMANTIC_MIN_SIM,
     save_every: int = 10,
@@ -242,7 +318,7 @@ def map_diagnoses_semantic(
 
     if resume and os.path.exists(csv_output_path):
         existing_df = pd.read_csv(csv_output_path)
-        required = {"matched_graph_nodes", "match_scores", "potential_tests"}
+        required = {"matched_graph_nodes", "match_scores", "potential_tests", "test_scores"}
         if required.issubset(existing_df.columns):
             for _, row in existing_df.dropna(subset=["matched_graph_nodes"]).iterrows():
                 dx_val = row["dx"]
@@ -316,7 +392,7 @@ def map_diagnoses_semantic(
     print(
         f"Starting semantic matching "
         f"(top_k={semantic_top_k}, threshold={semantic_threshold}, "
-        f"save_every={save_every}) ..."
+        f"min_score_sum={min_score_sum}, save_every={save_every}) ..."
     )
 
     semantic_matched   = 0
@@ -372,14 +448,14 @@ def map_diagnoses_semantic(
             progress.set_postfix(matched=f"{match_pct:.1f}%", refresh=False)
 
             if save_every > 0 and i % save_every == 0:
-                _save_partial(df, mapping_dictionary, min_nodes, csv_output_path)
+                _save_partial(df, mapping_dictionary, min_score_sum, csv_output_path)
                 tqdm.write(
                     f"  [checkpoint] Saved {i}/{len(remaining)} diagnoses → '{csv_output_path}'"
                 )
 
     finally:
         if mapping_dictionary:
-            _save_partial(df, mapping_dictionary, min_nodes, csv_output_path)
+            _save_partial(df, mapping_dictionary, min_score_sum, csv_output_path)
             tqdm.write(
                 f"  [checkpoint] Final flush: {len(mapping_dictionary)} diagnoses → '{csv_output_path}'"
             )
@@ -407,7 +483,10 @@ def map_diagnoses_semantic(
         lambda dx: _format_match_scores(mapping_dictionary.get(dx, []))
     )
     df["potential_tests"] = df["dx"].map(
-        lambda dx: _format_potential_tests(mapping_dictionary.get(dx, []), min_nodes)
+        lambda dx: _format_potential_tests(mapping_dictionary.get(dx, []), min_score_sum)
+    )
+    df["test_scores"] = df["dx"].map(
+        lambda dx: _format_test_scores(mapping_dictionary.get(dx, []))
     )
 
     # ADD THIS LINE HERE:
@@ -461,10 +540,11 @@ if __name__ == "__main__":
         help="Skip diagnoses already present in the output CSV.",
     )
     parser.add_argument(
-        "--min-nodes", type=int, default=1, metavar="N",
+        "--min-score-sum", type=float, default=_MIN_SCORE_SUM, metavar="F",
         help=(
-            "Minimum number of matched KG nodes recommending a test before it is "
-            "included in potential_tests. Default: 1."
+            "Minimum aggregate cosine similarity score (sum across all matched nodes) "
+            "for a test to appear in potential_tests. Default: 0.5 "
+            "(≈ one moderate-confidence match). Lower = more tests surfaced."
         ),
     )
     parser.add_argument(
@@ -487,11 +567,11 @@ if __name__ == "__main__":
         csv_output_path=args.output_csv,
         row_limit=args.limit,
         resume=args.resume,
-        min_nodes=args.min_nodes,
+        min_score_sum=args.min_score_sum,
         semantic_top_k=args.semantic_top_k,
         semantic_threshold=args.semantic_threshold,
         save_every=args.save_every,
     )
 
     print("\n--- Output Preview ---")
-    print(result_df[["dx", "matched_graph_nodes", "match_scores", "potential_tests"]].head())
+    print(result_df[["dx", "matched_graph_nodes", "match_scores", "potential_tests", "test_scores"]].head())
