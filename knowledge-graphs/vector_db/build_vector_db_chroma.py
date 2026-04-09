@@ -309,7 +309,9 @@ def build_kg_index(
             continue
         prefix = node_id.split(": ", 1)[0]
         label = node_id[len(prefix) + 2:]
-        node_type = _PREFIX_TO_TYPE.get(prefix, prefix)
+        # Prefer the 'type' attribute stored on the node (authoritative); fall
+        # back to the prefix mapping for nodes that don't carry a type attr.
+        node_type = attrs.get("type") or _PREFIX_TO_TYPE.get(prefix, prefix)
         text = build_node_text(node_id, attrs)
         payload = {
             "node_id":        node_id,

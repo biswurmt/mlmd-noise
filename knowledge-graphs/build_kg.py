@@ -74,6 +74,7 @@ _trial_cache: dict = {}
 
 # Node-type prefix mapping (used as the node ID prefix in the graph)
 _NODE_PREFIX = {
+    "Condition":            "Condition",
     "Symptom":              "Symptom",
     "Vital_Sign_Threshold": "Vital",
     "Demographic_Factor":   "Demographic",
