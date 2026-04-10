@@ -97,7 +97,7 @@ def visualize_interactive_kg(G):
 parser = argparse.ArgumentParser(description="Visualise the triage KG as an interactive HTML.")
 parser.add_argument(
     "--pkl",
-    default="triage_knowledge_graph.pkl",
+    default="triage_knowledge_graph_enriched.pkl",
     help="Path to the KG pickle file (default: triage_knowledge_graph_enriched.pkl). "
          "Falls back to triage_knowledge_graph.pkl if the enriched file is not found.",
 )
