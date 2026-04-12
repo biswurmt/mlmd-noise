@@ -495,7 +495,7 @@ def map_diagnoses_semantic(
     )
     
     df.to_csv(csv_output_path, index=False)
-    print(f"\nSaved enriched data to '{csv_output_path}' (min_nodes={min_nodes})")
+    print(f"\nSaved enriched data to '{csv_output_path}' (min_score_sum={min_score_sum})")
 
     # Validation (only when ground-truth columns are present)
     missing_gt = [col for col in TEST_COLUMN_MAP.values() if col not in df.columns]
