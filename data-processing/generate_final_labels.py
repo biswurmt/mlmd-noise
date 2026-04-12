@@ -99,20 +99,34 @@ print("="*95)
 print(f"{'Test':<25} {'GT Column':<15} {'TP':>5} {'FP':>6} {'TN':>7} {'FN':>5} {'Prec':>6} {'Rec':>6} {'F1':>6} {'Acc':>6}")
 print("-" * 95)
 
+validation_rows = []
 for gt_col, (pred_col, test_name) in test_mapping.items():
     actual_series = df[gt_col]
     predicted_series = df[pred_col]
-    
+
     tp = ((actual_series == 1) & (predicted_series == 1)).sum()
     tn = ((actual_series == 0) & (predicted_series == 0)).sum()
     fp = ((actual_series == 0) & (predicted_series == 1)).sum()
     fn = ((actual_series == 1) & (predicted_series == 0)).sum()
-    
+
     total = tp + tn + fp + fn
     acc = (tp + tn) / total if total > 0 else 0
     prec = tp / (tp + fp) if (tp + fp) > 0 else 0
     rec = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
-    
+
     print(f"{test_name:<25} {gt_col:<15} {tp:>5} {fp:>6} {tn:>7} {fn:>5} {prec:>6.3f} {rec:>6.3f} {f1:>6.3f} {acc:>6.3f}")
+    validation_rows.append({
+        "test_name": test_name,
+        "gt_column": gt_col,
+        "tp": int(tp), "fp": int(fp), "tn": int(tn), "fn": int(fn),
+        "precision": round(prec, 4),
+        "recall":    round(rec, 4),
+        "f1":        round(f1, 4),
+        "accuracy":  round(acc, 4),
+    })
 print("-" * 95)
+
+validation_path = output_path.replace(".csv", "_validation.csv")
+pd.DataFrame(validation_rows).to_csv(validation_path, index=False)
+print(f"\nValidation report saved to {validation_path}")
