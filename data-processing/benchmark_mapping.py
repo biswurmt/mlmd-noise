@@ -2,8 +2,10 @@
 """
 benchmark_mapping.py — Compare timing of substring vs semantic KG mapping.
 
-Randomly samples --sample rows from an input CSV (dx column), then runs
-three measurement phases per diagnosis:
+Randomly samples --sample *unique* diagnoses from an input CSV (dx column)
+to form a pool, then runs three measurement phases. In Phases 1 and 2
+each timing iteration randomly draws one diagnosis from that pool, so
+timings are spread across all inputs rather than repeating the same string:
 
   Phase 1 — Match-only hot-path (--iterations reps each):
       Substring : get_graph_matches(dx, kg)
@@ -38,6 +40,7 @@ import gc
 import json
 import os
 import pickle
+import random
 import sys
 import time
 from datetime import datetime
@@ -162,52 +165,65 @@ def measure_cold_start(graph_pkl_path: str, warm_dx: str, top_k: int, min_score:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 1 — Match-only timing
+# Phase 1 — Match-only timing (pool-based)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def time_match_only(
-    dx: str,
+def time_match_pool(
+    diagnoses: list[str],
     kg,
     n_iter: int,
     top_k: int,
     min_score: float,
+    rng: random.Random,
 ) -> dict:
     """
-    Return per-diagnosis timing stats for the matching hot-path only.
+    Run n_iter iterations, randomly picking a diagnosis from the pool each time.
 
-    dict keys:
-        sub_times_s     list[float]
-        sem_times_s     list[float]
-        sub_matches     last match result (list[dict])
-        sem_matches     last match result (list[dict])
+    Returns:
+        iter_records    list[dict]  one entry per iteration:
+                            {"dx", "sub_s", "sem_s", "sub_matches", "sem_matches"}
+        last_matches    dict[str, {"sub": list, "sem": list}]
+                            final match result seen for each unique dx
     """
-    sub_times: list[float] = []
-    sem_times: list[float] = []
-    sub_matches: list[dict] = []
-    sem_matches: list[dict] = []
+    # Fix the random sequence so both passes see the same draws
+    draw_seq = [rng.choice(diagnoses) for _ in range(n_iter)]
 
-    # Substring iterations
-    for _ in range(n_iter):
+    # Substring pass — collect (dx, time, result) in draw order
+    sub_run: list[tuple[str, float, list[dict]]] = []
+    for dx in draw_seq:
         gc.collect()
         t0 = time.perf_counter()
         result = get_graph_matches(dx, kg)
-        sub_times.append(time.perf_counter() - t0)
-    sub_matches = result  # last result
+        sub_run.append((dx, time.perf_counter() - t0, result))
 
-    # Semantic iterations (model already warm after cold-start phase)
-    for _ in range(n_iter):
+    # Semantic pass — same draw order
+    sem_run: list[tuple[str, float, list[dict]]] = []
+    for dx in draw_seq:
         gc.collect()
         t0 = time.perf_counter()
         result = get_graph_matches_semantic(dx, top_k=top_k, min_score=min_score)
-        sem_times.append(time.perf_counter() - t0)
-    sem_matches = result
+        sem_run.append((dx, time.perf_counter() - t0, result))
 
-    return {
-        "sub_times_s": sub_times,
-        "sem_times_s": sem_times,
-        "sub_matches": sub_matches,
-        "sem_matches": sem_matches,
-    }
+    # Collate per-iteration records
+    iter_records: list[dict] = []
+    for (dx, sub_s, sub_m), (_, sem_s, sem_m) in zip(sub_run, sem_run):
+        iter_records.append({
+            "dx":          dx,
+            "sub_s":       sub_s,
+            "sem_s":       sem_s,
+            "sub_matches": sub_m,
+            "sem_matches": sem_m,
+        })
+
+    # Keep the last seen match result for each unique dx (for output comparison)
+    last_matches: dict[str, dict] = {}
+    for rec in iter_records:
+        last_matches[rec["dx"]] = {
+            "sub": rec["sub_matches"],
+            "sem": rec["sem_matches"],
+        }
+
+    return {"iter_records": iter_records, "last_matches": last_matches}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,37 +297,58 @@ def _run_semantic_row(
     }
 
 
-def time_full_row(
-    dx: str,
+def time_full_row_pool(
+    diagnoses: list[str],
     kg,
     n_iter: int,
     top_k: int,
     min_score: float,
+    rng: random.Random,
 ) -> dict:
-    """Return per-diagnosis timing stats for the full single-row pipeline."""
-    sub_times: list[float] = []
-    sem_times: list[float] = []
-    sub_result: dict = {}
-    sem_result: dict = {}
+    """
+    Run n_iter iterations of the full single-row pipeline, randomly picking
+    a diagnosis from the pool each time (same draw sequence for both methods).
 
-    for _ in range(n_iter):
+    Returns:
+        iter_records    list[dict]  one entry per iteration:
+                            {"dx", "sub_s", "sem_s", "sub_result", "sem_result"}
+        last_results    dict[str, {"sub": dict, "sem": dict}]
+                            last pipeline output seen per unique dx
+    """
+    draw_seq = [rng.choice(diagnoses) for _ in range(n_iter)]
+
+    sub_run: list[tuple[str, float, dict]] = []
+    for dx in draw_seq:
         gc.collect()
         t0 = time.perf_counter()
-        sub_result = _run_substring_row(dx, kg)
-        sub_times.append(time.perf_counter() - t0)
+        result = _run_substring_row(dx, kg)
+        sub_run.append((dx, time.perf_counter() - t0, result))
 
-    for _ in range(n_iter):
+    sem_run: list[tuple[str, float, dict]] = []
+    for dx in draw_seq:
         gc.collect()
         t0 = time.perf_counter()
-        sem_result = _run_semantic_row(dx, kg, top_k=top_k, min_score=min_score)
-        sem_times.append(time.perf_counter() - t0)
+        result = _run_semantic_row(dx, kg, top_k=top_k, min_score=min_score)
+        sem_run.append((dx, time.perf_counter() - t0, result))
 
-    return {
-        "sub_times_s": sub_times,
-        "sem_times_s": sem_times,
-        "sub_result":  sub_result,
-        "sem_result":  sem_result,
-    }
+    iter_records: list[dict] = []
+    for (dx, sub_s, sub_r), (_, sem_s, sem_r) in zip(sub_run, sem_run):
+        iter_records.append({
+            "dx":         dx,
+            "sub_s":      sub_s,
+            "sem_s":      sem_s,
+            "sub_result": sub_r,
+            "sem_result": sem_r,
+        })
+
+    last_results: dict[str, dict] = {}
+    for rec in iter_records:
+        last_results[rec["dx"]] = {
+            "sub": rec["sub_result"],
+            "sem": rec["sem_result"],
+        }
+
+    return {"iter_records": iter_records, "last_results": last_results}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -328,156 +365,178 @@ def _stats_row(times: list[float]) -> dict:
     }
 
 
-def print_phase1_table(results: list[dict]) -> None:
-    _hr("PHASE 1 — Match-only timing summary")
+def _per_dx_stats(iter_records: list[dict], diagnoses: list[str], time_key: str) -> dict[str, dict]:
+    """Group iteration timings by dx and compute stats for each unique diagnosis."""
+    grouped: dict[str, list[float]] = {dx: [] for dx in diagnoses}
+    for rec in iter_records:
+        grouped[rec["dx"]].append(rec[time_key])
+    return {dx: _stats_row(times) if times else {} for dx, times in grouped.items()}
+
+
+def print_phase1_table(diagnoses: list[str], p1: dict) -> None:
+    _hr("PHASE 1 — Match-only timing summary  (per unique diagnosis)")
+    records = p1["iter_records"]
+    sub_stats = _per_dx_stats(records, diagnoses, "sub_s")
+    sem_stats = _per_dx_stats(records, diagnoses, "sem_s")
+
     col_w = 35
     hdr = (
         f"{'Diagnosis':<{col_w}} {'Method':<10}"
-        f" {'Mean':>9} {'Std':>9} {'Min':>9} {'Max':>9}"
+        f" {'Mean':>9} {'Std':>9} {'Min':>9} {'Max':>9} {'n':>4}"
         f"  {'Speedup':>8}"
     )
     sep = "─" * len(hdr)
     print(hdr)
     print(sep)
-    for row in results:
-        dx_short = row["dx"][:col_w - 1]
-        sub = row["phase1_sub"]
-        sem = row["phase1_sem"]
-        speedup = sem["mean_ms"] / sub["mean_ms"] if sub["mean_ms"] > 0 else float("nan")
-        print(
-            f"{dx_short:<{col_w}} {'substring':<10}"
-            f" {sub['mean_ms']:>8.3f}ms {sub['std_ms']:>8.3f}ms"
-            f" {sub['min_ms']:>8.3f}ms {sub['max_ms']:>8.3f}ms"
-        )
-        print(
-            f"{'':<{col_w}} {'semantic':<10}"
-            f" {sem['mean_ms']:>8.3f}ms {sem['std_ms']:>8.3f}ms"
-            f" {sem['min_ms']:>8.3f}ms {sem['max_ms']:>8.3f}ms"
-            f"  {speedup:>6.1f}×"
-        )
-        print(sep)
-
-
-def print_phase2_table(results: list[dict]) -> None:
-    _hr("PHASE 2 — Full single-row pipeline timing summary")
-    col_w = 35
-    hdr = (
-        f"{'Diagnosis':<{col_w}} {'Method':<10}"
-        f" {'Mean':>9} {'Std':>9} {'Min':>9} {'Max':>9}"
-        f"  {'Speedup':>8}"
-    )
-    sep = "─" * len(hdr)
-    print(hdr)
-    print(sep)
-    for row in results:
-        if row.get("phase2_sub") is None:
+    for dx in diagnoses:
+        sub = sub_stats.get(dx, {})
+        sem = sem_stats.get(dx, {})
+        if not sub or not sem:
+            print(f"  {dx[:col_w-1]!r}  (not sampled in this run)")
             continue
-        dx_short = row["dx"][:col_w - 1]
-        sub = row["phase2_sub"]
-        sem = row["phase2_sem"]
         speedup = sem["mean_ms"] / sub["mean_ms"] if sub["mean_ms"] > 0 else float("nan")
+        dx_short = dx[:col_w - 1]
         print(
             f"{dx_short:<{col_w}} {'substring':<10}"
             f" {sub['mean_ms']:>8.3f}ms {sub['std_ms']:>8.3f}ms"
-            f" {sub['min_ms']:>8.3f}ms {sub['max_ms']:>8.3f}ms"
+            f" {sub['min_ms']:>8.3f}ms {sub['max_ms']:>8.3f}ms {sub['n']:>4}"
         )
         print(
             f"{'':<{col_w}} {'semantic':<10}"
             f" {sem['mean_ms']:>8.3f}ms {sem['std_ms']:>8.3f}ms"
-            f" {sem['min_ms']:>8.3f}ms {sem['max_ms']:>8.3f}ms"
+            f" {sem['min_ms']:>8.3f}ms {sem['max_ms']:>8.3f}ms {sem['n']:>4}"
             f"  {speedup:>6.1f}×"
         )
         print(sep)
 
 
-def print_output_comparison(results: list[dict]) -> None:
-    _hr("OUTPUT COMPARISON — matched nodes & recommended tests")
-    for row in results:
-        dx = row["dx"]
-        print(f"\n  dx: {dx!r}")
+def print_phase2_table(diagnoses: list[str], p2: dict) -> None:
+    _hr("PHASE 2 — Full single-row pipeline timing summary  (per unique diagnosis)")
+    records = p2["iter_records"]
+    sub_stats = _per_dx_stats(records, diagnoses, "sub_s")
+    sem_stats = _per_dx_stats(records, diagnoses, "sem_s")
 
-        # Phase 1 matches
-        sub_m = _fmt_matches(row["sub_matches"])
-        sem_m = _fmt_matches(row["sem_matches"])
+    col_w = 35
+    hdr = (
+        f"{'Diagnosis':<{col_w}} {'Method':<10}"
+        f" {'Mean':>9} {'Std':>9} {'Min':>9} {'Max':>9} {'n':>4}"
+        f"  {'Speedup':>8}"
+    )
+    sep = "─" * len(hdr)
+    print(hdr)
+    print(sep)
+    for dx in diagnoses:
+        sub = sub_stats.get(dx, {})
+        sem = sem_stats.get(dx, {})
+        if not sub or not sem:
+            continue
+        speedup = sem["mean_ms"] / sub["mean_ms"] if sub["mean_ms"] > 0 else float("nan")
+        dx_short = dx[:col_w - 1]
+        print(
+            f"{dx_short:<{col_w}} {'substring':<10}"
+            f" {sub['mean_ms']:>8.3f}ms {sub['std_ms']:>8.3f}ms"
+            f" {sub['min_ms']:>8.3f}ms {sub['max_ms']:>8.3f}ms {sub['n']:>4}"
+        )
+        print(
+            f"{'':<{col_w}} {'semantic':<10}"
+            f" {sem['mean_ms']:>8.3f}ms {sem['std_ms']:>8.3f}ms"
+            f" {sem['min_ms']:>8.3f}ms {sem['max_ms']:>8.3f}ms {sem['n']:>4}"
+            f"  {speedup:>6.1f}×"
+        )
+        print(sep)
+
+
+def print_output_comparison(diagnoses: list[str], p1: dict, p2: dict | None) -> None:
+    _hr("OUTPUT COMPARISON — matched nodes & recommended tests  (last seen per dx)")
+    last_matches = p1["last_matches"]
+    last_results = p2["last_results"] if p2 else {}
+
+    for dx in diagnoses:
+        matches = last_matches.get(dx)
+        if matches is None:
+            print(f"\n  dx: {dx!r}  (not sampled)")
+            continue
+
+        print(f"\n  dx: {dx!r}")
+        sub_m = _fmt_matches(matches["sub"])
+        sem_m = _fmt_matches(matches["sem"])
         print(f"    [substring] nodes  : {sub_m}")
         print(f"    [semantic]  nodes  : {sem_m}")
 
-        # Phase 2 tests (if available)
-        if row.get("sub_result"):
-            sub_t = row["sub_result"].get("potential_tests", "—")
-            sem_t = row["sem_result"].get("potential_tests", "—")
-            sub_ts = row["sem_result"].get("test_scores", "")
+        if last_results.get(dx):
+            sub_t = last_results[dx]["sub"].get("potential_tests", "—")
+            sem_t = last_results[dx]["sem"].get("potential_tests", "—")
+            sem_ts = last_results[dx]["sem"].get("test_scores", "")
             print(f"    [substring] tests  : {sub_t}")
             print(f"    [semantic]  tests  : {sem_t}")
-            if sub_ts:
-                print(f"    [semantic]  scores : {sub_ts}")
+            if sem_ts:
+                print(f"    [semantic]  scores : {sem_ts}")
 
-        match_diff = set(_fmt_matches(row["sub_matches"]).split(" | ")) != set(
-            _fmt_matches(row["sem_matches"]).split(" | ")
-        )
-        if match_diff:
+        if set(sub_m.split(" | ")) != set(sem_m.split(" | ")):
             print(f"    ⚑ Methods returned DIFFERENT matched nodes for this dx")
 
 
-def print_aggregate_summary(results: list[dict], cold: dict) -> None:
+def print_aggregate_summary(p1: dict, p2: dict | None, cold: dict) -> None:
     _hr("AGGREGATE SUMMARY")
-    all_sub_p1 = [t for r in results for t in r["phase1_sub_raw"]]
-    all_sem_p1 = [t for r in results for t in r["phase1_sem_raw"]]
+    all_sub_p1 = [rec["sub_s"] for rec in p1["iter_records"]]
+    all_sem_p1 = [rec["sem_s"] for rec in p1["iter_records"]]
     mean_sub   = _mean(all_sub_p1) * 1000
     mean_sem   = _mean(all_sem_p1) * 1000
-    overall_speedup = mean_sem / mean_sub if mean_sub > 0 else float("nan")
+    speedup_p1 = mean_sem / mean_sub if mean_sub > 0 else float("nan")
 
-    print(f"  Substring mean (Phase 1) : {mean_sub:.3f} ms")
-    print(f"  Semantic  mean (Phase 1) : {mean_sem:.3f} ms")
-    print(f"  Semantic / Substring     : {overall_speedup:.1f}× slower on average\n")
+    print(f"  Phase 1 — match-only  ({len(all_sub_p1)} iterations across pool):")
+    print(f"    Substring mean         : {mean_sub:.3f} ms")
+    print(f"    Semantic  mean         : {mean_sem:.3f} ms")
+    print(f"    Semantic / Substring   : {speedup_p1:.1f}× slower on average\n")
 
     print(f"  Cold-start overhead:")
     print(f"    KG pickle load         : {_ms(cold['kg_load_s'])}")
     print(f"    Semantic model init    : {_ms(cold['semantic_init_s'])}")
 
-    if any(r.get("phase2_sub") for r in results):
-        all_sub_p2 = [t for r in results if r.get("phase2_sub_raw") for t in r["phase2_sub_raw"]]
-        all_sem_p2 = [t for r in results if r.get("phase2_sem_raw") for t in r["phase2_sem_raw"]]
+    if p2:
+        all_sub_p2 = [rec["sub_s"] for rec in p2["iter_records"]]
+        all_sem_p2 = [rec["sem_s"] for rec in p2["iter_records"]]
         if all_sub_p2 and all_sem_p2:
             mean_sub_p2 = _mean(all_sub_p2) * 1000
             mean_sem_p2 = _mean(all_sem_p2) * 1000
             speedup_p2  = mean_sem_p2 / mean_sub_p2 if mean_sub_p2 > 0 else float("nan")
-            print(f"\n  Full-row (Phase 2):")
+            print(f"\n  Phase 2 — full row  ({len(all_sub_p2)} iterations across pool):")
             print(f"    Substring mean         : {mean_sub_p2:.3f} ms")
             print(f"    Semantic  mean         : {mean_sem_p2:.3f} ms")
             print(f"    Semantic / Substring   : {speedup_p2:.1f}× slower on average")
 
 
-def export_csv(results: list[dict], cold: dict, output_path: str) -> None:
+def export_csv(p1: dict, p2: dict | None, cold: dict, output_path: str) -> None:
     rows = []
-    for r in results:
-        for phase, sub_key, sem_key in [
-            ("phase1", "phase1_sub_raw", "phase1_sem_raw"),
-            ("phase2", "phase2_sub_raw", "phase2_sem_raw"),
-        ]:
-            if not r.get(sub_key):
-                continue
-            for i, (s, se) in enumerate(zip(r[sub_key], r[sem_key])):
-                rows.append({
-                    "dx":            r["dx"],
-                    "phase":         phase,
-                    "iteration":     i + 1,
-                    "substring_s":   s,
-                    "semantic_s":    se,
-                    "speedup":       se / s if s > 0 else None,
-                })
+    for i, rec in enumerate(p1["iter_records"], 1):
+        rows.append({
+            "dx":          rec["dx"],
+            "phase":       "phase1",
+            "iteration":   i,
+            "substring_s": rec["sub_s"],
+            "semantic_s":  rec["sem_s"],
+            "speedup":     rec["sem_s"] / rec["sub_s"] if rec["sub_s"] > 0 else None,
+        })
+    if p2:
+        for i, rec in enumerate(p2["iter_records"], 1):
+            rows.append({
+                "dx":          rec["dx"],
+                "phase":       "phase2",
+                "iteration":   i,
+                "substring_s": rec["sub_s"],
+                "semantic_s":  rec["sem_s"],
+                "speedup":     rec["sem_s"] / rec["sub_s"] if rec["sub_s"] > 0 else None,
+            })
 
-    df = pd.DataFrame(rows)
-    # Prepend cold-start row
     cold_row = pd.DataFrame([{
-        "dx":           "__cold_start__",
-        "phase":        "cold",
-        "iteration":    1,
-        "substring_s":  cold["kg_load_s"],
-        "semantic_s":   cold["semantic_init_s"],
-        "speedup":      cold["semantic_init_s"] / cold["kg_load_s"],
+        "dx":          "__cold_start__",
+        "phase":       "cold",
+        "iteration":   1,
+        "substring_s": cold["kg_load_s"],
+        "semantic_s":  cold["semantic_init_s"],
+        "speedup":     cold["semantic_init_s"] / cold["kg_load_s"],
     }])
-    df = pd.concat([cold_row, df], ignore_index=True)
+    df = pd.concat([cold_row, pd.DataFrame(rows)], ignore_index=True)
     df.to_csv(output_path, index=False)
     print(f"\n  Raw timings exported to: {output_path}")
 
@@ -493,12 +552,13 @@ def main() -> None:
     parser.add_argument("--input-csv",  required=True,
                         help="CSV with a 'dx' column.")
     parser.add_argument("--sample",     type=int, default=_DEFAULT_SAMPLE, metavar="N",
-                        help=f"Rows to randomly sample (default: {_DEFAULT_SAMPLE}).")
+                        help=f"Unique diagnoses to include in the pool (default: {_DEFAULT_SAMPLE}).")
     parser.add_argument("--seed",       type=int, default=_DEFAULT_SEED, metavar="S",
-                        help=f"Random seed (default: {_DEFAULT_SEED}).")
+                        help=f"Random seed for pool selection and draw sequence (default: {_DEFAULT_SEED}).")
     parser.add_argument("--iterations", type=int, default=_DEFAULT_ITERATIONS, metavar="N",
-                        help=f"Timing reps per diagnosis in Phase 1 (default: {_DEFAULT_ITERATIONS}). "
-                             "Phase 2 uses N // 2.")
+                        help=f"Total pool draws in Phase 1 (default: {_DEFAULT_ITERATIONS}). "
+                             "Each draw randomly picks one diagnosis from the pool. "
+                             "Phase 2 uses N // 2 draws.")
     parser.add_argument("--no-full-row", action="store_true",
                         help="Skip Phase 2 (full single-row pipeline timing).")
     parser.add_argument("--output-csv",
@@ -512,25 +572,27 @@ def main() -> None:
                         help=f"KG pickle path (default: {_KG_PKL_FILE} from KG_PKL_FILE env).")
     args = parser.parse_args()
 
-    # ── Load input CSV + sample ───────────────────────────────────────────────
+    # ── Load input CSV, deduplicate dx, then sample ──────────────────────────
     _hr("Setup")
     print(f"  Input CSV    : {args.input_csv}")
     input_df = pd.read_csv(args.input_csv)
     if "dx" not in input_df.columns:
         sys.exit("  ERROR: input CSV must contain a 'dx' column.")
 
-    input_df = input_df.dropna(subset=["dx"])
-    n_sample = min(args.sample, len(input_df))
-    sample_df = input_df.sample(n=n_sample, random_state=args.seed)
-    diagnoses = sample_df["dx"].tolist()
+    # Deduplicate: work on unique dx values only
+    unique_dx = input_df["dx"].dropna().unique().tolist()
+    rng = random.Random(args.seed)
+    n_sample = min(args.sample, len(unique_dx))
+    diagnoses = rng.sample(unique_dx, k=n_sample)
 
-    print(f"  Total rows   : {len(input_df)}")
-    print(f"  Sampled      : {n_sample}  (seed={args.seed})")
-    print(f"  Iterations   : {args.iterations} (Phase 1) / "
+    print(f"  Total rows       : {len(input_df)}")
+    print(f"  Unique dx values : {len(unique_dx)}")
+    print(f"  Sampled (unique) : {n_sample}  (seed={args.seed})")
+    print(f"  Iterations       : {args.iterations} pool draws (Phase 1) / "
           f"{args.iterations // 2} (Phase 2)")
-    print(f"  Graph PKL    : {args.graph_pkl}")
-    print(f"  top_k        : {args.top_k}   min_score: {args.min_score}")
-    print(f"  Selected diagnoses:")
+    print(f"  Graph PKL        : {args.graph_pkl}")
+    print(f"  top_k            : {args.top_k}   min_score: {args.min_score}")
+    print(f"  Diagnosis pool:")
     for i, dx in enumerate(diagnoses, 1):
         print(f"    {i:>2}. {dx!r}")
 
@@ -543,54 +605,28 @@ def main() -> None:
     )
     kg = cold["kg"]
 
-    # ── Phase 1 + Phase 2: per-diagnosis ─────────────────────────────────────
-    _hr("PHASE 1 — Match-only timing  (warm model)")
-    print(f"  Running {args.iterations} iterations per diagnosis …\n")
+    # ── Phase 1: match-only, pool-based ──────────────────────────────────────
+    _hr("PHASE 1 — Match-only timing  (warm model, random pool draws)")
+    print(f"  {args.iterations} iterations, each randomly draws one dx from the pool …\n")
+    p1 = time_match_pool(diagnoses, kg, args.iterations, args.top_k, args.min_score, rng)
 
-    results: list[dict] = []
-
-    for i, dx in enumerate(diagnoses, 1):
-        print(f"  [{i}/{n_sample}] {dx!r}")
-        p1 = time_match_only(dx, kg, args.iterations, args.top_k, args.min_score)
-
-        row: dict = {
-            "dx":             dx,
-            "sub_matches":    p1["sub_matches"],
-            "sem_matches":    p1["sem_matches"],
-            "phase1_sub":     _stats_row(p1["sub_times_s"]),
-            "phase1_sem":     _stats_row(p1["sem_times_s"]),
-            "phase1_sub_raw": p1["sub_times_s"],
-            "phase1_sem_raw": p1["sem_times_s"],
-            # Phase 2 slots (filled below if not skipped)
-            "phase2_sub":     None,
-            "phase2_sem":     None,
-            "phase2_sub_raw": [],
-            "phase2_sem_raw": [],
-            "sub_result":     {},
-            "sem_result":     {},
-        }
-
-        if not args.no_full_row:
-            n_full = max(1, args.iterations // 2)
-            p2 = time_full_row(dx, kg, n_full, args.top_k, args.min_score)
-            row["phase2_sub"]     = _stats_row(p2["sub_times_s"])
-            row["phase2_sem"]     = _stats_row(p2["sem_times_s"])
-            row["phase2_sub_raw"] = p2["sub_times_s"]
-            row["phase2_sem_raw"] = p2["sem_times_s"]
-            row["sub_result"]     = p2["sub_result"]
-            row["sem_result"]     = p2["sem_result"]
-
-        results.append(row)
+    # ── Phase 2: full row, pool-based ────────────────────────────────────────
+    p2: dict | None = None
+    if not args.no_full_row:
+        n_full = max(1, args.iterations // 2)
+        _hr("PHASE 2 — Full single-row pipeline  (warm model, random pool draws)")
+        print(f"  {n_full} iterations …\n")
+        p2 = time_full_row_pool(diagnoses, kg, n_full, args.top_k, args.min_score, rng)
 
     # ── Print reports ─────────────────────────────────────────────────────────
-    print_phase1_table(results)
-    if not args.no_full_row:
-        print_phase2_table(results)
-    print_output_comparison(results)
-    print_aggregate_summary(results, cold)
+    print_phase1_table(diagnoses, p1)
+    if p2:
+        print_phase2_table(diagnoses, p2)
+    print_output_comparison(diagnoses, p1, p2)
+    print_aggregate_summary(p1, p2, cold)
 
     # ── Export raw timings CSV ────────────────────────────────────────────────
-    export_csv(results, cold, args.output_csv)
+    export_csv(p1, p2, cold, args.output_csv)
 
     print("\nDone.\n")
 
