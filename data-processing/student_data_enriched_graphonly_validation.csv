@@ -1,5 +1,0 @@
-test_name,gt_column,tp,fp,tn,fn,precision,recall,f1,accuracy
-ECG,ecg_dx,0,0,200,0,0.0,0.0,0.0,1.0
-Arm X-Ray,xray_arm_dx,0,3,196,1,0.0,0.0,0.0,0.98
-Appendix Ultrasound,us_app_dx,2,16,182,0,0.1111,1.0,0.2,0.92
-Testicular Ultrasound,us_testes_dx,0,7,192,1,0.0,0.0,0.0,0.96
