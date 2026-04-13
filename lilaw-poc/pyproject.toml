@@ -1,0 +1,40 @@
+[project]
+name = "lilaw-poc"
+version = "0.1.0"
+description = "LiLAW proof-of-concept for MLMD noise robustness"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.2",
+    "scikit-learn>=1.4",
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.11",
+]
+medmnist = [
+    "torchvision>=0.17",
+    "medmnist>=3.0",
+    "timm>=1.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "ANN", "B", "SIM"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
