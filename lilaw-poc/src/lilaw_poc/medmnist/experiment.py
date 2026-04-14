@@ -75,14 +75,12 @@ def _evaluate_model(
     return acc, auroc
 
 
-def run_single_experiment(config: ExperimentConfig) -> ExperimentResult:
+def run_single_experiment(config: ExperimentConfig, device: torch.device) -> ExperimentResult:
     """Run one experiment: baseline CE vs LiLAW-CE on a MedMNIST dataset."""
     t0 = time.time()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     # Seed everything
     torch.manual_seed(config.seed)
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.manual_seed_all(config.seed)
     rng = np.random.default_rng(config.seed)
 
@@ -158,6 +156,7 @@ def run_sweep(
     seeds: list[int] | None = None,
     epochs: int = 100,
     output_dir: str = "results/medmnist",
+    device: torch.device | None = None,
 ) -> list[ExperimentResult]:
     """Run full sweep over datasets x noise rates x seeds."""
     if datasets is None:
@@ -182,7 +181,11 @@ def run_sweep(
                     dataset=dataset, noise_rate=noise_rate, seed=seed, epochs=epochs,
                 )
                 print(f"\n[{i}/{total}] {dataset} | noise={noise_rate:.0%} | seed={seed}")
-                result = run_single_experiment(config)
+                # Determine device for this run
+                dev = device if device is not None else torch.device(
+                    "cuda" if torch.cuda.is_available() else "cpu"
+                )
+                result = run_single_experiment(config, dev)
                 results.append(result)
                 print(
                     f"  Baseline: acc={result.baseline_acc:.4f} auroc={result.baseline_auroc:.4f} "
