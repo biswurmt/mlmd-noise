@@ -38,6 +38,12 @@ class ExperimentResult:
     final_meta_params: dict[str, float] = field(default_factory=dict)
 
 
+def _predict_scores(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Run inference on the model's device and return CPU scores."""
+    model_device = next(model.parameters()).device
+    return model(x.to(model_device)).squeeze().cpu()
+
+
 def run_single_experiment(config: ExperimentConfig, device: torch.device | None = None) -> ExperimentResult:
     """Run one experiment: baseline vs LiLAW on a dataset+noise combination."""
     torch.manual_seed(config.seed)
@@ -80,11 +86,8 @@ def run_single_experiment(config: ExperimentConfig, device: torch.device | None 
     baseline_result.model.eval()
     lilaw_result.model.eval()
     with torch.no_grad():
-        # Move test inputs to the model device for inference, then bring scores back to CPU
-        test_device = dev if 'dev' in locals() else (device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
-        x_test_dev = x_test.to(test_device)
-        baseline_scores = baseline_result.model(x_test_dev).squeeze().cpu()
-        lilaw_scores = lilaw_result.model(x_test_dev).squeeze().cpu()
+        baseline_scores = _predict_scores(baseline_result.model, x_test)
+        lilaw_scores = _predict_scores(lilaw_result.model, x_test)
 
     return ExperimentResult(
         config=config,

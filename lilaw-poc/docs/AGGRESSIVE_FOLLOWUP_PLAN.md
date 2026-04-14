@@ -58,6 +58,7 @@ The bar here is not "proof." The bar is "enough signal to justify one or two con
 - `scripts/run_tabular_matrix.py`: wrapper added for scripted tabular runs
 - `scripts/run_medmnist_matrix.py`: wrapper added for scripted MedMNIST runs
 - `scripts/dispatch_queue.sh`: simple queue runner for CPU or GPU job files
+- `scripts/monitor_dispatch.sh`: periodic snapshot monitor for queue runs
 - `scripts/build_priority_jobs.py`: emits recommended phase-1 command files
 - `scripts/summarize_results.py`: prints grouped summaries from result directories
 
@@ -73,41 +74,55 @@ Run this from the `lilaw-poc/` directory on the remote machine.
 
 ```bash
 cd lilaw-poc
-uv venv .venv
+./scripts/setup_env.sh --with-medmnist
 source .venv/bin/activate
-uv pip install -e ".[dev,medmnist]"
 ```
 
 Notes:
 
-- Do **not** rely on `setup.sh` for this phase; it installs `.[dev]` only.
+- Use `./.venv/bin/python -u` for long-running experiment commands and generated job files.
 - MedMNIST and OpenML datasets will download on first use. Keep caches on local disk.
 - Use `tmux` or `screen` for all long-running launch sessions.
+- Use [PHASE1_TROUBLESHOOTING.md](./PHASE1_TROUBLESHOOTING.md) as the operational runbook if jobs stall or fail.
 
 ## Phase 0: Smoke Test
 
 Do this before flooding the machine with jobs.
 
-### 0A. MedMNIST smoke
+### 0A. Generate smoke job files
 
 ```bash
-uv run python scripts/run_medmnist_matrix.py \
-  --datasets bloodmnist \
-  --noise-rates 0.0 \
-  --seeds 42 \
-  --epochs 2 \
-  --output-dir results/smoke/medmnist_blood_e2
+mkdir -p jobs logs results/smoke
+
+./.venv/bin/python scripts/build_priority_jobs.py \
+  --profile gpu_smoke \
+  --output jobs/gpu_smoke.txt
+
+./.venv/bin/python scripts/build_priority_jobs.py \
+  --profile cpu_smoke \
+  --output jobs/cpu_smoke.txt
 ```
 
-### 0B. Tabular smoke
+### 0B. Launch smoke jobs
 
 ```bash
-uv run python scripts/run_tabular_matrix.py \
-  --datasets adult \
-  --noise-rates 0.2 \
-  --seeds 42 \
-  --epochs 2 \
-  --output-dir results/smoke/tabular_adult_e2
+bash scripts/dispatch_queue.sh \
+  --job-file jobs/gpu_smoke.txt \
+  --gpus 0,1,2 \
+  --log-dir logs/gpu_smoke
+
+bash scripts/dispatch_queue.sh \
+  --job-file jobs/cpu_smoke.txt \
+  --max-parallel 1 \
+  --log-dir logs/cpu_smoke
+```
+
+### 0C. Monitor smoke jobs
+
+```bash
+bash scripts/monitor_dispatch.sh \
+  --log-dir logs/gpu_smoke \
+  --results-dir results/smoke
 ```
 
 Success criteria:
@@ -137,11 +152,11 @@ The priority suites are intentionally designed to answer several questions at on
 ```bash
 mkdir -p jobs logs results/priority
 
-uv run python scripts/build_priority_jobs.py \
+./.venv/bin/python scripts/build_priority_jobs.py \
   --profile gpu_phase1 \
   --output jobs/gpu_phase1.txt
 
-uv run python scripts/build_priority_jobs.py \
+./.venv/bin/python scripts/build_priority_jobs.py \
   --profile cpu_phase1 \
   --output jobs/cpu_phase1.txt
 ```
@@ -166,6 +181,25 @@ bash scripts/dispatch_queue.sh \
   --job-file jobs/cpu_phase1.txt \
   --max-parallel 4 \
   --log-dir logs/cpu_phase1
+```
+
+### Monitor phase 1
+
+Use a separate shell or `tmux` pane:
+
+```bash
+bash scripts/monitor_dispatch.sh \
+  --log-dir logs/gpu_phase1 \
+  --results-dir results/priority
+```
+
+For CPU runs:
+
+```bash
+bash scripts/monitor_dispatch.sh \
+  --log-dir logs/cpu_phase1 \
+  --results-dir results/priority \
+  --process-pattern 'run_tabular_matrix.py'
 ```
 
 ### What the phase-1 jobs actually do
@@ -199,7 +233,7 @@ Do **not** wait for every last run if the story becomes obvious early.
 Summarize everything written under `results/priority/`:
 
 ```bash
-uv run python scripts/summarize_results.py results/priority
+./.venv/bin/python scripts/summarize_results.py results/priority
 ```
 
 ### Decision rules
@@ -234,7 +268,7 @@ Promote that dataset to:
 Command pattern:
 
 ```bash
-uv run python scripts/run_medmnist_matrix.py \
+./.venv/bin/python -u scripts/run_medmnist_matrix.py \
   --datasets <promising_dataset> \
   --noise-rates 0.0 0.2 0.4 0.6 0.8 \
   --seeds 42 123 456 789 2024 \
