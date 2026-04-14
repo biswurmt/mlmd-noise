@@ -7,7 +7,7 @@ The label imputation pipeline constructs an evidence-grounded Knowledge Graph (K
 \paragraph{Knowledge Graph construction.}
 The graph is built in four stages.
 
-\textit{Stage 1: Baseline rule generation.} An LLM generates triage rules mapping clinical observations to conditions and their required tests. To reduce hallucination, the LLM is grounded via RAG over the EPFL clinical guidelines dataset, with retrieved guideline texts providing in-context learning.
+\textit{Stage 1: Baseline rule generation.} GPT-5-mini generates triage rules mapping clinical observations to conditions and their required tests. To reduce hallucination, the model is grounded via RAG over the EPFL clinical guidelines dataset, with retrieved guideline texts providing in-context evidence.
 
 \textit{Stage 2: Ontology standardization.} All entities are mapped to recognized medical ontologies through external APIs. Symptom nodes receive Human Phenotype Ontology (HP) and MONDO terms (EMBL-EBI OLS4 API); condition nodes are annotated with WHO ICD-10 codes (UMLS REST API) and ICD-10-CA codes (Canada Health Infoway FHIR); diagnostic test nodes receive LOINC panel codes.
 
@@ -25,17 +25,46 @@ We evaluate two retrieval strategies. \textit{KG String Matching} uses bidirecti
 
 \subsection{Noise-aware training via LiLAW}
 
-% [MISSING: Tyler's section. Key content to cover:
-%   - LiLAW overview: meta-learning framework that learns three scalar parameters (alpha, beta, delta)
-%     to weight training samples by loss magnitude
-%   - Bilevel optimization: inner loop updates model parameters on the weighted training batch;
-%     outer loop updates alpha/beta/delta on held-out validation performance
-%   - How this handles residual noise after imputation: imputation corrects deterministic false
-%     negatives (clear diagnosis-test link); LiLAW down-weights probabilistic ones (ambiguous
-%     clinical indication, e.g. chest pain sometimes but not always warrants ECG)
-%   - Training schedule, convergence criteria, hyperparameter selection
-%   Citation: \cite{moturu_lilaw_2025}]
-\textbf{[TODO: Tyler to draft.]}
+Label imputation corrects false negatives where a post-assessment diagnosis conclusively implies a test was needed. It cannot resolve cases where the clinical indication is ambiguous: chest pain sometimes warrants an ECG and sometimes does not, so no imputation rule can adjudicate these encounters. Residual false negatives of this kind remain in both the original and imputed training sets. LiLAW (Lightweight Learnable Adaptive Weighting)~\cite{moturu_lilaw_2025} handles this residual noise at training time by learning to down-weight samples whose observed label is inconsistent with the model's predictions.
+
+\paragraph{Sample difficulty characterization.}
+
+Let $s_i = \mathrm{softmax}(f_\theta(x_i))$ be the model's output distribution for training sample $i$ with observed label $\tilde{y}_i$. LiLAW characterizes each sample by two quantities: $s_i[\tilde{y}_i]$, the predicted probability assigned to the observed label, and $\max(s_i)$, the model's peak class confidence. Their relationship defines four difficulty regimes:
+
+\begin{itemize}
+    \item \textit{Easy}: $s_i[\tilde{y}_i] = \max(s_i)$ and $\max(s_i)$ is high. The model agrees with the observed label confidently.
+    \item \textit{Moderate}: $\max(s_i)$ is low regardless of agreement. The model is uncertain.
+    \item \textit{Hard}: $s_i[\tilde{y}_i] < \max(s_i)$ and $\max(s_i)$ is high. The model confidently predicts a different class than the observed label — the signature of a likely mislabelled sample.
+\end{itemize}
+
+In our setting, hard samples correspond precisely to the false negatives that remain after imputation: encounters where the model assigns high probability to ``test needed'' but the training label records ``test not performed.'' These are the cases most likely to reflect external-provider tests that were never captured in the SickKids EHR.
+
+\paragraph{Weight functions.}
+
+LiLAW introduces three scalar meta-parameters, $\alpha$, $\beta$, and $\delta$, each governing a weight function over the $(s_i[\tilde{y}_i],\, \max(s_i))$ plane:
+
+\begin{align}
+    \mathcal{W}_\alpha &= \sigma\!\left(\alpha \cdot s_i[\tilde{y}_i] - \max(s_i)\right) \\
+    \mathcal{W}_\beta  &= \sigma\!\left(-\left(\beta \cdot s_i[\tilde{y}_i] - \max(s_i)\right)\right) \\
+    \mathcal{W}_\delta &= \exp\!\left(-\frac{\left(\delta \cdot s_i[\tilde{y}_i] - \max(s_i)\right)^2}{2}\right)
+\end{align}
+
+$\mathcal{W}_\alpha$ is a sigmoid that is high for easy samples (agreement, high confidence); $\mathcal{W}_\beta$ is an inverted sigmoid that is high for hard samples (disagreement, high confidence); $\mathcal{W}_\delta$ is a radial basis function centered on the moderate regime (low confidence either way). The total sample weight is $\mathcal{W} = \mathcal{W}_\alpha + \mathcal{W}_\beta + \mathcal{W}_\delta$, and the LiLAW loss is $\mathcal{L}_W = \mathcal{W} \cdot \mathcal{L}$. As $\alpha$, $\beta$, and $\delta$ are learned, the model adapts which difficulty regime to emphasise at each stage of training rather than applying a fixed curriculum.
+
+\paragraph{Bilevel optimization.}
+
+The meta-parameters are learned via bilevel optimization. Each training mini-batch alternates between two steps. In the inner step, $\alpha$, $\beta$, and $\delta$ are frozen and the model parameters $\theta$ are updated by gradient descent on the weighted training loss $\mathcal{L}_W$. In the outer step, $\theta$ is frozen and a validation mini-batch is drawn; $\alpha$, $\beta$, and $\delta$ are then updated by SGD on the LiLAW loss evaluated on that validation batch. The joint objective is:
+
+\begin{align}
+    \theta^* &= \arg\min_{\theta}\; \sum_{(x_i, \tilde{y}_i) \in \mathcal{D}_t} \mathcal{L}_{W_{\alpha^*,\beta^*,\delta^*}} \notag \\
+    \text{s.t.}\quad \alpha^*, \beta^*, \delta^* &= \arg\min_{\alpha,\beta,\delta}\; \sum_{(x_j, \tilde{y}_j) \in \mathcal{D}_v} \mathcal{L}_{W_{\theta^*}}
+\end{align}
+
+Crucially, the validation set $\mathcal{D}_v$ does not need to be clean. Accuracy on a held-out noisy set is an unbiased estimator of accuracy under the noisy data distribution~\cite{moturu_lilaw_2025}, so LiLAW can steer training using the same validation partition used for early stopping. This property is essential for our setting, where a clean labelled subset of the EHR data is not available.
+
+\paragraph{Implementation.}
+
+LiLAW wraps the existing training loop without modifying the model architecture, adding only one forward and one backward pass on a validation mini-batch per training batch. Meta-parameters are initialised at $\alpha = 10.0$, $\beta = 2.0$, $\delta = 6.0$ and updated by SGD with learning rate $0.005$ and weight decay $10^{-4}$. The first epoch uses standard unweighted BCE loss as a warmup before LiLAW activates, allowing the model to develop an initial difficulty signal before meta-learning begins.
 
 \subsection{Combined approach}
 
