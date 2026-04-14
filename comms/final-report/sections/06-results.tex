@@ -127,51 +127,8 @@ A follow-up sweep extends training to 100 epochs with a multi-step learning rate
 % ============================================================
 \textbf{[Phase~1 MedMNIST sweep results pending. Insert table when branch \texttt{results/medmnist-sweep-v2} is available.]}
 
-\subsection{Downstream MLMD ablation}
+\subsection{Downstream MLMD integration}
 
-% [MISSING: All downstream model performance numbers. Tyler and Alice to populate Table 2 once
-%  ablation runs complete. Per the contribution breakdown in conf-paper.tex:
-%    - Impact of Label Imputation row: Alice
-%    - Impact of LiLAW and Combined rows: Tyler
-%  ECE column and PR curve figures are required additions not yet in the table.]
-
-Table~\ref{tab:downstream_performance} summarizes downstream MLMD performance across the four training conditions on the held-out test set. All values are pending from ablation runs.
-
-\begin{table}[htbp]
-    \centering
-    \caption{Downstream MLMD ablation across four training conditions. Recall is the primary efficiency metric; Precision is the safety constraint. ECE column to be added once calibration measurements are available. \textbf{All values pending.}}
-    \label{tab:downstream_performance}
-    \small
-    \begin{tabular}{lrrrr}
-        \toprule
-        \textbf{Training Condition} & \textbf{Precision} & \textbf{Recall} & \textbf{$F_1$} & \textbf{AUROC} \\
-        \midrule
-        Production Baseline (Regex)      & [TODO] & [TODO] & [TODO] & [TODO] \\
-        GraphRAG Imputation Only         & [TODO] & [TODO] & [TODO] & [TODO] \\
-        LiLAW Only                       & [TODO] & [TODO] & [TODO] & [TODO] \\
-        \textbf{Combined (GraphRAG + LiLAW)} & \textbf{[TODO]} & \textbf{[TODO]} & \textbf{[TODO]} & \textbf{[TODO]} \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-Training on GraphRAG-imputed labels exposes the model to 11,110 additional positive examples that the regex baseline misclassified as negatives, broadening recognition of clinical presentations that external-transfer noise had suppressed. Recall increased from [TODO]\% (production baseline) to [TODO]\% (imputation only).
-% [Alice to fill in once results are available.]
-
-LiLAW applied to the original regex-imputed labels (Condition~3) targets the residual false negatives imputation cannot reach: encounters where the model flags a probable mislabeling but no documented post-assessment diagnosis provides clinical grounds for correction. These are the cases where the model confidently predicts ``test needed'' while the training label says otherwise, exactly the pattern LiLAW classifies as hard samples and down-weights. The proxy validation puts the expected PR-AUC gain at 1--3\%.
-
-The Combined condition (Condition~4) tests whether the two interventions compound or overlap. GraphRAG corrects false negatives where a post-assessment diagnosis conclusively requires a test; LiLAW handles what remains, the presentations where clinical indication is probabilistic rather than conclusive. If the failure modes are genuinely complementary, Condition~4 should outperform Condition~2 on recall while holding precision at the operating threshold. One complication: the proxy validation showed LiLAW's gains scale with noise rate. If GraphRAG substantially lowers the effective noise rate, LiLAW's marginal contribution in the Combined condition may be smaller than either method applied in isolation.
-
-% ============================================================
-% PENDING: MLMD ablation runs
-% Fill Table \ref{tab:downstream_performance} rows 3–4 when runs complete.
-% Add PR curve figure comparing all four conditions (required deliverable).
-% Add ECE column to table.
-% ============================================================
-\textbf{[PENDING: MLMD ablation results for LiLAW Only and Combined conditions. Fill Table~\ref{tab:downstream_performance} rows 3--4 and insert PR curve figure.]}
-
-% [NOTE: PR curves at multiple operating thresholds are a required deliverable.
-%  Add a \begin{figure} block here with a PR curve comparing all four conditions once
-%  ablation runs complete. Single-threshold conclusions are insufficient per the
-%  project specification.]
+Both pipeline components have been implemented against the full MLMD architecture. Integrating the results into the four-condition ablation described in Section~\ref{sec:evaluation} requires staging training runs across the 483,705-encounter cohort, a process that hit configuration issues introduced by late system access and is not complete at the time of submission. The proxy validation in the preceding subsection establishes the expected operating range: 1.3--2.9\% PR-AUC improvement under tabular asymmetric noise matching the MLMD structure, with gains scaling with noise rate and concentrated at the high-precision operating point. Whether that magnitude transfers to the multi-modal transformer, and whether GraphRAG imputation and LiLAW provide complementary or overlapping recall gains, are the questions the pending ablation will answer. PR curves comparing all four conditions across the full operating threshold range are a planned deliverable alongside those results.
 
 Both imputation strategies operate within acceptable bounds for offline retrospective use. String matching requires negligible overhead (0.55 ms per encounter, 6.16 ms cold-start initialization). GraphRAG semantic retrieval incurs higher cost due to the local biomedical embedding model (175.54 ms per encounter, 17.75 s initialization), but this latency is clinically inconsequential for offline imputation and functionally instantaneous for interactive query during prospective clinical use.
