@@ -291,6 +291,12 @@ class LiLAWFusionLightningModule(pl.LightningModule):
 
         return loss
 
+    def on_validation_epoch_end(self) -> None:
+        sch = self.lr_schedulers()
+        val_loss = self.trainer.callback_metrics.get("val_loss")
+        if sch is not None and val_loss is not None:
+            sch.step(val_loss)
+
     # ------------------------------------------------------------------
     # Validation (unchanged from baseline)
     # ------------------------------------------------------------------

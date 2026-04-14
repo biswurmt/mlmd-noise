@@ -71,8 +71,11 @@ models[mlmd_name]['model'] = LiLAWFusionLightningModule(
 )
 ```
 
-Everything else — `Trainer` config, callbacks, dataloaders, `save_model()` —
-is unchanged.
+Everything else — `Trainer` config, callbacks, dataloaders — is unchanged.
+
+**`save_model()` requires one change:** replace
+`FusionLightningModule.load_from_checkpoint(...)` with
+`LiLAWFusionLightningModule.load_from_checkpoint(...)`.
 
 ---
 
@@ -124,6 +127,29 @@ In addition to the baseline metrics, the module logs `lilaw_alpha`,
 `lilaw_beta`, and `lilaw_delta` each epoch. Monitoring these confirms the
 meta-parameters are moving and gives a signal about what the weighter is
 learning.
+
+---
+
+## Departures from the Paper
+
+A few implementation choices differ from a literal reading of the paper's
+Algorithm 1 (arXiv:2502.01981). These are intentional and standard practice,
+but worth noting for review:
+
+1. **Weight detachment in the inner step.** The paper's pseudocode lets
+   gradients flow through W(s) to θ. This implementation detaches the weights
+   (`w.detach() * bce`), so the model gradient comes only from the per-sample
+   loss. This prevents the model from "gaming" the weighting and is standard
+   in meta-learning for sample reweighting (the PoC does the same).
+
+2. **No `pos_weight` in the meta-update.** The inner step uses the baseline's
+   `pos_weight`-adjusted BCE; the outer (meta) step uses plain BCE. The
+   meta-parameters should learn to steer the model toward good held-out
+   performance under the natural loss, not the frequency-adjusted one.
+
+3. **Warmup epochs.** The paper starts LiLAW from epoch 1, but their
+   experiments use pretrained models. Since MLMD trains from scratch, a
+   warmup period lets predictions become meaningful before LiLAW activates.
 
 ---
 
