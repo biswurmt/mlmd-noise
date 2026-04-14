@@ -104,7 +104,11 @@ def main() -> None:
     if args.device == "auto":
         dev = _torch.device("cuda" if _torch.cuda.is_available() else "cpu")
     elif args.device == "cuda":
-        dev = _torch.device("cuda")
+        if not _torch.cuda.is_available():
+            print("Requested device 'cuda' but CUDA is not available; falling back to CPU")
+            dev = _torch.device("cpu")
+        else:
+            dev = _torch.device("cuda")
     else:
         dev = _torch.device("cpu")
 
