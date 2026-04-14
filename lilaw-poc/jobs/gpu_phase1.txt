@@ -1,8 +1,8 @@
-python -u scripts/run_medmnist_matrix.py --datasets bloodmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q1_blood_full
-python -u scripts/run_medmnist_matrix.py --datasets dermamnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q1_derma_full
-python -u scripts/run_medmnist_matrix.py --datasets pathmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q1_path_full
-python -u scripts/run_medmnist_matrix.py --datasets bloodmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 30 --output-dir results/priority/medmnist_q2_blood_short
-python -u scripts/run_medmnist_matrix.py --datasets dermamnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 30 --output-dir results/priority/medmnist_q2_derma_short
-python -u scripts/run_medmnist_matrix.py --datasets pathmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 30 --output-dir results/priority/medmnist_q2_path_short
-python -u scripts/run_medmnist_matrix.py --datasets bloodmnist --noise-rates 0.6 0.8 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q3_blood_highnoise
-python -u scripts/run_medmnist_matrix.py --datasets pathmnist --noise-rates 0.6 0.8 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q3_path_highnoise
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets bloodmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q1_blood_full
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets dermamnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q1_derma_full
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets pathmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q1_path_full
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets bloodmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 30 --output-dir results/priority/medmnist_q2_blood_short
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets dermamnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 30 --output-dir results/priority/medmnist_q2_derma_short
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets pathmnist --noise-rates 0.0 0.3 0.5 --seeds 42 123 456 --epochs 30 --output-dir results/priority/medmnist_q2_path_short
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets bloodmnist --noise-rates 0.6 0.8 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q3_blood_highnoise
+./.venv/bin/python -u scripts/run_medmnist_matrix.py --datasets pathmnist --noise-rates 0.6 0.8 --seeds 42 123 456 --epochs 100 --output-dir results/priority/medmnist_q3_path_highnoise
