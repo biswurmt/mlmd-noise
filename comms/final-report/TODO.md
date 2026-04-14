@@ -32,6 +32,23 @@ Every section exists and compiles. There are a final few gaps in Alice's wheelho
 
 ---
 
+## KG String table — needs Alice to reconcile before submission
+
+A second review pass (Codex) flagged that the KG String rows in `06-results.tex` do not match the committed validation CSV at `data-processing/student_data_enriched_graphonly_full_validation.csv`. The same values were already in the rough draft (`rough-drafts/conf-paper.tex:183–193`), so this is a rough-draft-era issue that carried through unchanged.
+
+The specific mismatches (report vs. CSV):
+
+| Pathway | Report | CSV |
+|---|---|---|
+| Arm X-Ray | P=0.009 / R=0.031 / F1=0.013 / disc=6,696 | P=0.0049 / R=0.0131 / F1=0.0072 / FP=5,040 |
+| Appendix US | P=0.809 / R=0.793 / F1=0.801 / disc=617 | P=0.0503 / R=0.7936 / F1=0.0946 / FP=49,354 |
+| Testicular US | disc=20,035 | FP=20,072 |
+| ECG | matches cleanly | ✓ |
+
+**Suggestion:** Check which experiment/config the report table came from — the CSV is `graphonly` (substring matching without the KG overlay), so the report values may be from a different run or threshold setting. If the CSV is the right source, the Arm X-Ray and Appendix US rows need correcting and the surrounding prose (especially the F1=0.801 Appendix claim in the Results and Discussion) will need updating too.
+
+---
+
 ## What Alice needs to do today
 
 ### 1. Fill the KG validation subsection (`06-results.tex`, lines ~5–11)
