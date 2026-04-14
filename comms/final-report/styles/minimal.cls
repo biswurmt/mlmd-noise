@@ -108,6 +108,8 @@
     \fi
     \par\vspace{6pt}%
     \noindent{\color{navy}\rule{\textwidth}{0.4pt}}\par
+    \thispagestyle{empty}%
+    \setcounter{page}{0}%
     \newpage
   }
 \makeatother
