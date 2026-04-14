@@ -1,12 +1,47 @@
 \section{Evaluation}
 
-The cohort is temporally partitioned to simulate prospective deployment. Encounters from [TODO: start year] to [TODO: end year] form the training and validation set ($X$\%); encounters from [TODO: year] to January 2026 are held out for testing ($Y$\%).
-% [NOTE: Temporal split years not yet finalized. Alice to confirm from the experimental setup.]
+\subsection{Data partitioning}
 
-We compare four training conditions: (1) \textit{Production Baseline}, a standard classifier trained on the original regex-imputed labels; (2) \textit{GraphRAG Imputation Only}, retrained on the KG-imputed dataset with standard training; (3) \textit{LiLAW Only}, trained on the original regex labels with LiLAW-weighted training; and (4) \textit{Combined}, LiLAW-weighted training on the KG-imputed dataset.
+The cohort is partitioned temporally to simulate prospective deployment: encounters are sorted by arrival date and split sequentially, so the model is always evaluated on data from later in time than it was trained on. Random splitting would allow future information to leak into training through seasonal and longitudinal patterns in the data. Following the split protocol established in the predecessor study~\cite{singh_assessment_2022}, 55\% of encounters form the training set, 15\% the validation set, and 30\% the held-out test set, spanning the full cohort window of June 2018 to January 2026.
+% [TODO: Confirm that the pre-split CSVs use these proportions. If a fixed calendar
+%  cutoff was used instead, replace the proportions with explicit dates and counts.]
 
-Recall (true positive rate) is the primary metric. It measures the fraction of needed tests the model authorizes at triage, directly quantifying efficiency: each authorized test completes while the patient waits for assessment, while each miss returns the patient to the serialized queue. Precision (positive predictive value) is the safety constraint, ensuring the system does not burden ancillary departments with unwarranted test authorizations. We report precision-recall (PR) curves at multiple operating thresholds rather than single-threshold summaries, because clinical deployment requires understanding the full tradeoff. AUROC captures overall discriminative ability under severe class imbalance. Expected Calibration Error (ECE) measures whether model confidence scores can be interpreted as meaningful probabilities, which determines how much weight clinicians can place on the system's predictions.
-% [NOTE: ECE figures are required per the project specification and are not yet included.
-%  Add a calibration curve figure here once ablation runs complete.]
+\subsection{Model architecture}
 
-The imputation pipeline is evaluated separately from the downstream model. The production regex system serves as a high-precision, low-recall baseline. Novel positive imputations absent from the regex baseline are classified as ``discoveries'': potential clinical false negatives the regex missed. To validate these, a clinical domain expert performed retrospective chart review on a random sample of $n = \text{[TODO]}$ newly imputed labels, confirming their clinical validity.
+All four experimental conditions train and evaluate the same \textit{MultiModalFusionTransformer} architecture inherited from the current deployed MLMD system. Tabular features (vitals, demographics, CTAS score, postal distance, cyclical datetime encodings) are projected from a 27-dimensional input to a 256-dimensional embedding via two linear layers. Three free-text fields (chief complaint and triage note fields) are each encoded independently by a BERT-based biomedical language model served via a local MLflow endpoint, producing three 256-dimensional text embeddings. The four representations (one tabular, three text) form a sequence of tokens processed through four transformer encoder layers with four attention heads and a feedforward dimension of 1024. An attention pooling layer aggregates the sequence into a single vector, which passes through a layer normalisation and a linear classification head for binary prediction. The model has approximately 3.3M trainable parameters.
+
+Text fields are encoded with ClinicalBERT~\cite{alsentzer_publicly_2019}, a BERT model pretrained on clinical notes from MIMIC-III discharge summaries.
+
+This architecture replaces the 5-layer fully connected network from the original MLMD validation~\cite{singh_assessment_2022}. The fusion design allows the model to use free-text triage notes directly without the QuickUMLS concept-extraction step required by the predecessor.
+
+\subsection{Training configuration}
+
+All conditions use identical training hyperparameters to isolate the effect of label strategy. Models are optimised with RAdam (learning rate $10^{-3}$, weight decay $10^{-4}$) with a ReduceLROnPlateau scheduler (minimum learning rate $10^{-4}$, monitored on validation loss). Training runs for up to 15 epochs with early stopping on validation loss. Batch size is 64.
+
+Class imbalance is handled via a per-pathway positive weight applied to the binary cross-entropy loss. The weight is computed as $w^{+} = \min\!\left(\frac{N_{\text{neg}}}{N_{\text{pos}}},\; 10.0\right)$, where the cap of 10.0 prevents extreme weighting for the most imbalanced pathways. Across the four test types, positive-class proportions range from approximately 0.4\% (Arm X-Rays) to 2.5\% (ECGs), producing raw imbalance ratios between roughly 38:1 and 252:1 before capping.
+
+\subsection{Experimental conditions}
+
+We compare four training conditions:
+\begin{enumerate}
+    \item \textit{Production Baseline}: standard training on the original regex-imputed labels, reproducing the currently deployed configuration.
+    \item \textit{GraphRAG Imputation Only}: standard training on the KG-imputed dataset (11,110 additional positive labels), with no change to the training objective.
+    \item \textit{LiLAW Only}: LiLAW-weighted training on the original regex labels, with no change to the label set.
+    \item \textit{Combined}: LiLAW-weighted training on the KG-imputed dataset.
+\end{enumerate}
+
+Conditions (1) and (2) isolate the effect of label correction; conditions (1) and (3) isolate the effect of noise-aware training; condition (4) versus (2) and (3) tests whether the two interventions provide complementary gains.
+
+\subsection{Metrics}
+
+Recall (true positive rate) is the primary metric. Each missed prediction returns a patient to the serialized queue, so recall directly measures triage efficiency. Precision (positive predictive value) is the safety constraint: unnecessary test authorizations burden ancillary departments and erode clinician trust in the system over time. We report precision-recall (PR) curves across the full range of operating thresholds rather than single-threshold summaries, because clinical deployment requires understanding the full efficiency-safety tradeoff before selecting an operating point.
+
+AUROC captures overall discriminative ability under class imbalance. Expected Calibration Error (ECE) measures whether model confidence scores are reliable enough for clinicians to act on: a well-calibrated system permits threshold selection based on stated probability of need rather than empirical operating-point tuning.
+% [TODO: Add calibration curve figure here once ablation runs complete.
+%  One calibration plot per condition, or a single overlay, comparing all four.]
+
+\subsection{Imputation evaluation}
+
+The imputation pipeline is evaluated separately from the downstream model. Novel positive imputations absent from the production regex baseline are classified as ``discoveries'': candidate clinical false negatives the regex system missed. The production regex system serves as the high-precision, low-recall reference point; GraphRAG discoveries represent potential recall gains the regex cannot capture.
+
+To validate that discoveries reflect genuine clinical false negatives rather than retrieval errors, a clinical domain expert performed retrospective chart review on a random sample of newly imputed labels; results are reported in Section~\ref{sec:results}.

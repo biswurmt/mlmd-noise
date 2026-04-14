@@ -50,7 +50,6 @@
 \titleformat{\paragraph}[runin]
   {\normalfont\small\itshape}
   {}{0em}{}
-  [.]
 \titlespacing*{\paragraph}{\parindent}{0pt}{0.4em}
 
 %% ── Figures ──────────────────────────────────────────────────────────────────
