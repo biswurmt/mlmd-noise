@@ -80,8 +80,11 @@ def run_single_experiment(config: ExperimentConfig, device: torch.device | None 
     baseline_result.model.eval()
     lilaw_result.model.eval()
     with torch.no_grad():
-        baseline_scores = baseline_result.model(x_test).squeeze()
-        lilaw_scores = lilaw_result.model(x_test).squeeze()
+        # Move test inputs to the model device for inference, then bring scores back to CPU
+        test_device = dev if 'dev' in locals() else (device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+        x_test_dev = x_test.to(test_device)
+        baseline_scores = baseline_result.model(x_test_dev).squeeze().cpu()
+        lilaw_scores = lilaw_result.model(x_test_dev).squeeze().cpu()
 
     return ExperimentResult(
         config=config,
