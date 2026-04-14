@@ -300,20 +300,14 @@ CLAUDE.md
 # OS generated files
 .DS_Store
 
-<<<<<<< HEAD
 # Git worktrees (local parallel workspaces, never committed)
 .worktrees/
-*.pptx
-=======
-# uv lock files (library PoCs — not pinning deps)
-uv.lock
-
-# Git worktrees (local parallel workspaces, never committed)
-.worktrees/
-*.pptx
 
 # uv lock files (library PoCs — not pinning deps)
 uv.lock
+
+# PowerPoint presentations
+*.pptx
 
 # LaTeX intermediate build output
 presentation-slide/background/out/
