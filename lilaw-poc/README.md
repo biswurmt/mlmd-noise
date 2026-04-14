@@ -5,15 +5,21 @@ Proof-of-concept implementation of **LiLAW: Lightweight Learnable Adaptive Weigh
 ## Quick Start
 
 ```bash
-# Install
-uv sync
+# Install a local dev env with PyTorch CUDA 12.6 wheels by default
+./scripts/setup_env.sh
+
+# Or include MedMNIST / torchvision
+./scripts/setup_env.sh --with-medmnist
 
 # Run tests
+. .venv/bin/activate
 pytest
 
 # Run experiments
-uv run python -m lilaw_poc.experiment --help
+python -m lilaw_poc.experiment --help
 ```
+
+The setup defaults to the PyTorch `cu126` wheel index, which matches Linux hosts whose NVIDIA driver exposes CUDA `12.6`. Use `./scripts/setup_env.sh --cpu` if you need a CPU-only environment instead.
 
 The main entry point is `scripts/run_sweep_runpod.sh`, which sweeps over datasets (Breast Cancer, Adult, Pima Indians) and noise rates (10%-40%).
 
