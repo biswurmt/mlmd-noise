@@ -1,0 +1,31 @@
+/home/iakrout/projects/student_projects/mlmd_students
+├── Sample_training_for_students.ipynb
+├── data
+│   ├── tech_val_data_ecg.csv
+│   ├── tech_val_data_us_abdo.csv
+│   ├── tech_val_data_us_app.csv
+│   ├── tech_val_data_us_testes.csv
+│   ├── tech_val_data_xray_arm.csv
+│   ├── test_data_ecg.csv
+│   ├── test_data_us_abdo.csv
+│   ├── test_data_us_app.csv
+│   ├── test_data_us_testes.csv
+│   ├── test_data_xray_arm.csv
+│   ├── train_data_ecg.csv
+│   ├── train_data_us_abdo.csv
+│   ├── train_data_us_app.csv
+│   ├── train_data_us_testes.csv
+│   ├── train_data_xray_arm.csv
+│   ├── val_data_ecg.csv
+│   ├── val_data_us_abdo.csv
+│   ├── val_data_us_app.csv
+│   ├── val_data_us_testes.csv
+│   └── val_data_xray_arm.csv
+├── finetuned_bert_model
+│   ├── MLmodel
+│   ├── artifacts [error opening dir]
+│   ├── conda.yaml
+│   ├── python_env.yaml
+│   ├── python_model.pkl
+│   └── requirements.txt
+└── readme.txt

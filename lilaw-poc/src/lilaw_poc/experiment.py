@@ -38,7 +38,13 @@ class ExperimentResult:
     final_meta_params: dict[str, float] = field(default_factory=dict)
 
 
-def run_single_experiment(config: ExperimentConfig) -> ExperimentResult:
+def _predict_scores(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Run inference on the model's device and return CPU scores."""
+    model_device = next(model.parameters()).device
+    return model(x.to(model_device)).squeeze().cpu()
+
+
+def run_single_experiment(config: ExperimentConfig, device: torch.device | None = None) -> ExperimentResult:
     """Run one experiment: baseline vs LiLAW on a dataset+noise combination."""
     torch.manual_seed(config.seed)
     rng = np.random.default_rng(config.seed)
@@ -57,10 +63,14 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResult:
 
     # Train baseline
     torch.manual_seed(config.seed)
+    dev = device if device is not None else torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
     baseline_result = train_baseline(
         x_train, y_train_noisy, x_val, y_val_noisy,
         input_dim=input_dim, epochs=config.epochs,
         batch_size=config.batch_size, hidden_dim=config.hidden_dim,
+        device=dev,
     )
 
     # Train LiLAW
@@ -69,14 +79,15 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResult:
         x_train, y_train_noisy, x_val, y_val_noisy,
         input_dim=input_dim, epochs=config.epochs,
         batch_size=config.batch_size, hidden_dim=config.hidden_dim,
+        device=dev,
     )
 
     # Evaluate on clean test set
     baseline_result.model.eval()
     lilaw_result.model.eval()
     with torch.no_grad():
-        baseline_scores = baseline_result.model(x_test).squeeze()
-        lilaw_scores = lilaw_result.model(x_test).squeeze()
+        baseline_scores = _predict_scores(baseline_result.model, x_test)
+        lilaw_scores = _predict_scores(lilaw_result.model, x_test)
 
     return ExperimentResult(
         config=config,
@@ -94,6 +105,7 @@ def run_sweep(
     seeds: list[int] | None = None,
     epochs: int = 50,
     output_dir: str = "results",
+    device: torch.device | None = None,
 ) -> list[ExperimentResult]:
     """Run full sweep over datasets x noise rates x seeds."""
     if datasets is None:
@@ -118,7 +130,7 @@ def run_sweep(
                     dataset=dataset, noise_rate=noise_rate, seed=seed, epochs=epochs,
                 )
                 print(f"[{i}/{total}] {dataset} | noise={noise_rate} | seed={seed}")
-                result = run_single_experiment(config)
+                result = run_single_experiment(config, device=device)
                 results.append(result)
                 print(
                     f"  Baseline PR-AUC={result.baseline_pr_auc:.4f} | "

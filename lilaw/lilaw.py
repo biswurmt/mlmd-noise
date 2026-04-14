@@ -2,6 +2,9 @@
 
 Implements the three weight functions (W_alpha, W_beta, W_delta) and the
 meta-parameter container with manual SGD update for the bilevel optimization.
+
+Reference: "Lightweight Learnable Adaptive Weighting to Claim the Jungle of
+Noisy Labels" (arXiv:2502.01981).
 """
 
 import torch
@@ -14,7 +17,7 @@ def compute_lilaw_weights(
     beta: float | torch.Tensor,
     delta: float | torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Compute LiLAW sample weights from softmax outputs.
+    """Compute LiLAW per-sample weights from predicted probabilities.
 
     Args:
         s_label: Predicted probability for the observed label, shape (N,).
@@ -41,6 +44,10 @@ def compute_lilaw_weights(
 class LiLAWWeighter:
     """Container for LiLAW meta-parameters with manual SGD update.
 
+    Meta-parameters are plain tensors (not nn.Parameters) so they live
+    outside Lightning's optimizer. Device placement is handled explicitly
+    via to().
+
     Attributes:
         alpha: Learnable scalar for easy-sample weighting (init 10.0).
         beta: Learnable scalar for hard-sample weighting (init 2.0).
@@ -57,6 +64,13 @@ class LiLAWWeighter:
         self.beta = torch.tensor(beta_init, requires_grad=True)
         self.delta = torch.tensor(delta_init, requires_grad=True)
 
+    def to(self, device: torch.device | str) -> "LiLAWWeighter":
+        """Move meta-parameters to device, preserving grad state."""
+        self.alpha = self.alpha.detach().to(device).requires_grad_(True)
+        self.beta = self.beta.detach().to(device).requires_grad_(True)
+        self.delta = self.delta.detach().to(device).requires_grad_(True)
+        return self
+
     def compute_weights(
         self,
         s_label: torch.Tensor,
@@ -64,14 +78,6 @@ class LiLAWWeighter:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute weights using current meta-parameters."""
         return compute_lilaw_weights(s_label, s_max, self.alpha, self.beta, self.delta)
-
-    def to(self, device: torch.device | str) -> "LiLAWWeighter":
-        """Move all meta-parameters onto a target device."""
-        dev = torch.device(device)
-        self.alpha = self.alpha.detach().to(dev).requires_grad_(self.alpha.requires_grad)
-        self.beta = self.beta.detach().to(dev).requires_grad_(self.beta.requires_grad)
-        self.delta = self.delta.detach().to(dev).requires_grad_(self.delta.requires_grad)
-        return self
 
     def meta_step(self, lr: float = 0.005, wd: float = 0.0001) -> None:
         """Manual SGD update on meta-parameters with weight decay."""
@@ -94,7 +100,7 @@ class LiLAWWeighter:
         self.delta.requires_grad_(requires_grad)
 
     def state_dict(self) -> dict[str, float]:
-        """Return current meta-parameter values."""
+        """Return current meta-parameter values as plain floats."""
         return {
             "alpha": self.alpha.item(),
             "beta": self.beta.item(),
