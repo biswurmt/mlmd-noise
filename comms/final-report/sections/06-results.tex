@@ -95,36 +95,6 @@ We replicated the BloodMNIST experiment (11,959 training samples, 8 classes, sym
 
 Meta-parameter diagnostics identified the cause. $\alpha$ saturated near its maximum (${\approx}10$) within the first few epochs regardless of noise rate, exhausting the easy-sample suppression signal early. $\beta$ and $\delta$ did adapt monotonically with noise (increasing by 0.6 and 1.1 from 0\% to 80\%), confirming the weighting mechanism responds to corruption. The most natural explanation is epoch budget: patience=10 terminated training before the $\beta$ and $\delta$ dynamics could reshape the loss landscape. A follow-up sweep extends training to 100 epochs on BloodMNIST and DermaMNIST at 0\%, 30\%, and 50\% noise; results are pending.
 
-% ============================================================
-% PHASE 1 PLACEHOLDER
-% Fill from branch results/medmnist-sweep-v2 when available.
-% BloodMNIST + DermaMNIST × {0%, 30%, 50%} × 3 seeds × 100 epochs.
-% Key questions: Does LiLAW's advantage emerge at 30–50% noise with full epoch budget?
-% Does alpha saturation resolve under the multi-step LR schedule?
-%
-% Uncomment and populate the table below, then replace the bold placeholder:
-%
-% \begin{table}[htbp]
-%     \centering
-%     \caption{Phase~1 MedMNIST sweep: BloodMNIST and DermaMNIST, 100 epochs, no early stopping.}
-%     \label{tab:medmnist_v2}
-%     \small
-%     \begin{tabular}{llrrr}
-%         \toprule
-%         \textbf{Dataset} & \textbf{Noise} & \textbf{Baseline} & \textbf{LiLAW} & \textbf{$\Delta$} \\
-%         \midrule
-%         BloodMNIST  & 0\%  & [TODO] & [TODO] & [TODO] \\
-%         BloodMNIST  & 30\% & [TODO] & [TODO] & [TODO] \\
-%         BloodMNIST  & 50\% & [TODO] & [TODO] & [TODO] \\
-%         DermaMNIST  & 0\%  & [TODO] & [TODO] & [TODO] \\
-%         DermaMNIST  & 30\% & [TODO] & [TODO] & [TODO] \\
-%         DermaMNIST  & 50\% & [TODO] & [TODO] & [TODO] \\
-%         \bottomrule
-%     \end{tabular}
-% \end{table}
-% ============================================================
-\textbf{[Phase~1 MedMNIST sweep results pending. Insert table when branch \texttt{results/medmnist-sweep-v2} is available.]}
-
 \subsection{Downstream MLMD integration}
 
 Both pipeline components have been implemented against the full MLMD architecture. The four-condition ablation across the 483,705-encounter cohort encountered configuration issues from late system access and is not complete at submission. The proxy validation establishes the expected operating range: 1.2--2.9\% PR-AUC improvement under tabular asymmetric noise, with gains scaling with noise rate and concentrated at the high-precision operating point. Whether that magnitude transfers to the multi-modal transformer, and whether imputation and LiLAW provide complementary or overlapping recall gains, are the questions the pending ablation will answer.
