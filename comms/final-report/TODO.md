@@ -19,8 +19,8 @@
 
 ## What Tyler wrote / owns
 
-- [ ] Related Work: Meta-Learning for Noisy Labels (`01-introduction-clinical-motivation.tex`)
-- [ ] Methods: Robust Training via LiLAW (`02-data-and-setting-methods.tex`)
+- [x] Related Work: Meta-Learning for Noisy Labels (`02-related-work.tex`)
+- [x] Methods: Robust Training via LiLAW (`04-methods.tex`)
 - [ ] Results: LiLAW-only ablation narrative + numbers (Table 2)
 - [ ] Results: Combined condition narrative + numbers (Table 2, shared with Alice)
 
@@ -34,10 +34,8 @@
 - [ ] PR curves figure (required; multi-threshold, all 4 conditions)
 - [ ] KG validation stats: node/edge counts, audit verdict breakdown, mean confidence score
 - [ ] Clinician chart review: sample size + accuracy rate for discovered labels
-- [ ] Temporal split years for train/test partition
 
 **Polish — once numbers are in:**
 - [ ] Fill abstract result placeholders (`00-abstract.tex`)
-- [ ] Update discussion with final quantitative conclusions (`04-discussion-and-limitations.tex`)
-- [ ] Verify all citations compile (check `ref-copy.bib` against `references.bib`)
+- [ ] Update discussion with final quantitative conclusions (`07-discussion-and-limitations.tex`)
 - [ ] Run `make pdf` and review layout, table overflow, figure placement

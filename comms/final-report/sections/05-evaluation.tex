@@ -3,8 +3,6 @@
 \subsection{Data partitioning}
 
 The cohort is partitioned temporally to simulate prospective deployment: encounters are sorted by arrival date and split sequentially, so the model is always evaluated on data from later in time than it was trained on. Random splitting would allow future information to leak into training through seasonal and longitudinal patterns in the data. Following the split protocol established in the predecessor study~\cite{singh_assessment_2022}, 55\% of encounters form the training set, 15\% the validation set, and 30\% the held-out test set, spanning the full cohort window of June 2018 to January 2026.
-% [TODO: Confirm that the pre-split CSVs use these proportions. If a fixed calendar
-%  cutoff was used instead, replace the proportions with explicit dates and counts.]
 
 \subsection{Model architecture}
 
