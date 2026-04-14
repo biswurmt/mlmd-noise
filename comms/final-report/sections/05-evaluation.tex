@@ -1,0 +1,33 @@
+\section{Evaluation}
+
+\subsection{Data partitioning}
+
+The cohort is partitioned temporally to simulate prospective deployment: encounters are sorted by arrival date and split sequentially so the model is always evaluated on data from later in time than its training window. Random splitting would allow future information to leak into training through seasonal and longitudinal patterns in the data. Following the protocol of the predecessor study~\cite{singh_assessment_2022}, 55\% of encounters form the training set, 15\% the validation set, and 30\% the held-out test set, spanning June 2018 to January 2026.
+
+\subsection{Model architecture}
+
+All four experimental conditions train and evaluate the same \textit{MultiModalFusionTransformer} architecture. Tabular features (vitals, demographics, CTAS score, postal distance, cyclical datetime encodings) project from a 27-dimensional input to a 256-dimensional embedding. Three free-text fields are each encoded by ClinicalBERT~\cite{alsentzer_publicly_2019} to 256-dimensional embeddings. The four representations pass through four transformer encoder layers (4 heads, feedforward dimension 1024), an attention pooling layer, and a linear classification head, totalling approximately 3.3M parameters. This replaces the 5-layer fully connected network from the original MLMD validation~\cite{singh_assessment_2022} and uses free-text triage notes directly without concept extraction.
+
+\subsection{Training configuration}
+
+All conditions use identical hyperparameters to isolate the effect of label strategy: RAdam (lr $10^{-3}$, weight decay $10^{-4}$) with ReduceLROnPlateau scheduling, up to 15 epochs with early stopping on validation loss, batch size 64. Class imbalance is handled via a per-pathway positive weight $w^{+} = \min\!\left(\frac{N_{\text{neg}}}{N_{\text{pos}}},\; 10.0\right)$. Positive-class proportions range from 0.4\% (Arm X-Rays) to 2.5\% (ECGs), producing raw imbalance ratios between 38:1 and 252:1 before capping.
+
+\subsection{Experimental conditions}
+
+We compare four training conditions:
+\begin{enumerate}
+    \item \textit{Production Baseline}: standard training on original regex-imputed labels.
+    \item \textit{GraphRAG Imputation Only}: standard training on the KG-imputed dataset (11,110 additional positive labels).
+    \item \textit{LiLAW Only}: LiLAW-weighted training on original regex labels.
+    \item \textit{Combined}: LiLAW-weighted training on the KG-imputed dataset.
+\end{enumerate}
+
+Both pipeline components have been implemented and validated in isolation (Section~\ref{sec:results}); the integrated four-condition ablation on the full cohort is the immediate next evaluation step.
+
+\subsection{Metrics}
+
+Recall is the primary metric: each missed prediction returns a patient to the serialized queue. Precision is the safety constraint: unnecessary authorizations burden ancillary departments and erode clinician trust. We report full precision-recall (PR) curves rather than single-threshold summaries, since clinical deployment requires understanding the efficiency-safety tradeoff before selecting an operating point. AUROC captures discriminative ability under class imbalance. Expected Calibration Error (ECE) measures whether confidence scores are reliable enough for threshold selection based on stated probability rather than empirical tuning.
+
+\subsection{Imputation evaluation}
+
+Novel positive imputations absent from the production regex baseline are classified as ``discoveries'': candidate false negatives the regex system missed. A clinical domain expert performed retrospective chart review on a random sample of newly imputed labels to validate that discoveries reflect genuine false negatives; results are reported in Section~\ref{sec:results}.

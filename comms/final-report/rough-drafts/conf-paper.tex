@@ -1,0 +1,619 @@
+%\documentclass[wcp,gray]{jmlr} % test grayscale version
+ %\documentclass[wcp]{jmlr}% former name JMLR W\&CP
+\documentclass[pmlr]{jmlr}% new name PMLR (Proceedings of Machine Learning)
+
+\RequirePackage{graphicx}
+ % The following packages will be automatically loaded:
+ % amsmath, amssymb, natbib, graphicx, url, algorithm2e
+ \usepackage{booktabs}
+ %\usepackage{rotating}% for sideways figures and tables
+ \usepackage{longtable}% for long tables
+ % The booktabs package is used by this sample document
+ % (it provides \toprule, \midrule and \bottomrule).
+ % 
+ % book quality tables
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{color, soul}
+\usepackage{booktabs} 
+\usepackage{tabularx}
+\usepackage{multirow}
+
+ % The siunitx package is used by this sample document
+ % to align numbers in a column by their decimal point.
+ % Remove the next line if you don't require it.
+\makeatletter
+\def\set@curr@file#1{\def\@curr@file{#1}} %temp workaround for 2019 latex release
+\makeatother
+\usepackage[load-configurations=version-1]{siunitx} % newer version
+
+ % The following command is just for this sample document:
+\newcommand{\cs}[1]{\texttt{\char`\\#1}}
+
+ % Define an unnumbered theorem just for this sample document:
+\theorembodyfont{\upshape}
+\theoremheaderfont{\scshape}
+\theorempostheader{:}
+\theoremsep{\newline}
+\newtheorem*{note}{Note}
+
+ % change the arguments, as appropriate, in the following:
+\jmlrvolume{[VOLUME \# TBD]}
+\jmlryear{2026}
+\jmlrworkshop{Machine Learning for Healthcare}
+
+% H: Not sure if we need this:
+% Short headings should be running head and authors last names
+% \ShortHeadings{A Really Awesome MLHC Article}{Lastname, PhD and Lastname, MD}
+% \firstpageno{1}
+
+\title[Decoding Triage]{Reading Between the Lines: Knowledge-Grounded LLM Imputation and Meta-Learning for Noisy Data in Pediatric Emergency Triage}
+
+\author{\Name{Alice Chua}
+       \Email{alice.chua@mail.utoronto.ca}\\ 
+       \addr Department of Computer Science\\
+       University of Toronto\\
+       Toronto, Ontario, Canada 
+       \AND
+       \Name{Firstname Lastname}
+       \Email{name@email.edu}\\ 
+       \addr Department\\
+       University\\
+       City, State, Country} 
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  Summary of the article.  Be sure to highlight how the work
+  contributes to our understanding of machine learning and healthcare.
+  Our code and Knowledge Graph implementation are publicly available at \url{https://github.com/biswurmt/mlmd-noise}.
+\end{abstract}
+
+\section{Introduction}
+
+Redundant wait times constrain patient throughput in the pediatric Emergency Department (ED) at The Hospital for Sick Children (SickKids). Under standard care, patients queue twice: first for an initial physician assessment to order diagnostics, then again for results. Reducing these delays is clinically significant. Faster diagnostic turnaround enables earlier treatment decisions, shortens time to disposition, and reduces ED crowding—factors that directly affect patient outcomes and experience.
+
+The hospital has implemented a machine learning medical directive (MLMD) system that uses triage data to predict and authorize relevant tests proactively, parallelizing diagnostic processing with the initial wait. This work builds directly upon that foundational MLMD framework \cite{singh2022assessment}, which successfully demonstrated the feasibility and safety of automating diagnostic testing at triage. Currently, the MLMD focuses on four high-volume, time-sensitive diagnostic pathways: arm X-rays, electrocardiograms (ECGs), appendix ultrasounds, and testicular ultrasounds. However, the model's performance across these pathways is limited by significant label noise. Positive labels in the SickKids Electronic Health Record (EHR) are reliable, but negative labels are ambiguous because the EHR is not integrated with external providers. Because records of externally performed tests are unavailable, their occurrence must be inferred retrospectively from the patient's final documented diagnosis. To achieve this, the current baseline system utilizes a regex-driven approach to identify variations of diagnoses in the clinical text and map them to their corresponding required tests. While this rules-based mapping is clinician-validated, it is inherently brittle; it struggles to capture the vast semantic nuance, shorthand, and variability inherent to clinical documentation. As a result, many valid diagnoses—and the external tests they imply—are missed by the regex, causing the system to misclassify these instances as true negatives (false negatives). This label ambiguity pushes the MLMD toward a conservative decision boundary that artificially depresses recall. Each relevant test the model fails to authorize returns a patient to the slower, serialized workflow, forfeiting substantial efficiency gains and necessitating a more semantically robust label imputation method.
+
+To overcome this limitation, we propose a two-pronged methodology to handle asymmetric label noise at both the data and algorithmic levels. First, we replace the brittle regex baseline with a dynamic, evidence-grounded Knowledge Graph and Large Language Model (LLM) pipeline, capable of semantically parsing clinical triage notes to accurately impute missing test labels. Second, to manage the residual uncertainty inherent to imputed labels, we apply LiLAW (Lightweight Learnable Adaptive Weighting) \cite{moturu2025lilaw}, a meta-learning framework that dynamically down-weights suspected false negatives during training. By combining semantic knowledge extraction with robust meta-learning, we demonstrate that the MLMD can safely expand its decision boundary, substantially improving recall and unlocking further efficiency gains for the pediatric ED.
+
+\subsection*{Generalizable Insights about Machine Learning in the Context of Healthcare}
+
+This work offers several insights relevant to the broader application of machine learning in clinical environments:
+
+\begin{itemize}
+    \item \textbf{A Generalizable Pipeline for Clinical Information Retrieval:} While this study applies an LLM and Knowledge Graph (KG) pipeline specifically to impute missing diagnostic tests, this architecture serves as a highly adaptable blueprint. A similar RAG-grounded, ontology-enriched pipeline can be deployed to solve a wide array of complex ``information retrieval'' and structuring problems in healthcare, such as extracting social determinants of health from unstructured notes, inferring undocumented comorbidities, or mapping historical disease progressions.
+    \item \textbf{Overcoming Siloed Data without EHR Integration:} Asymmetric label noise caused by unobserved, externally-performed clinical events (e.g., tests, prescriptions) is a pervasive issue across fragmented hospital networks. This work demonstrates that we can reliably recover these hidden clinical signals directly from unstructured triage narratives using semantic extraction, bypassing the immediate need for cross-institutional EHR interoperability.
+    \item \textbf{Synergizing Deterministic Knowledge with Robust Training:} Automated label imputation is rarely flawless. By coupling a semantically rigorous, rule-based extraction engine (the Knowledge Graph) with a noise-robust meta-learning algorithm (LiLAW), this framework illustrates how to safely train models on real-world clinical datasets where ground-truth labels are inherently probabilistic or incomplete.
+\end{itemize}
+
+\section{Related Work}
+\subsection*{Label Imputation in EHRs}
+The utility of Electronic Health Records (EHRs) for downstream machine learning applications is frequently bottlenecked by pervasive missing data \cite{sysreview_ehr_missing_2024}. In clinical environments, missingness is rarely completely at random; rather, the mechanisms of missingness often reflect underlying clinical workflows, institutional silos \cite{ross2020accuracy}, or patient acuity \cite{geisinger_missingness_2021}. Standard deep learning approaches have shown success in imputing missing continuous features such as laboratory variables or vital signs \cite{ieee_dl_imputation}, and specialized architectures have advanced multi-label classification tasks in clinical settings \cite{santos_corki_2024}. However, imputing missing \textit{labels} presents a distinct challenge. Previous efforts to address label missingness in clinical notes have relied on traditional natural language processing (NLP) and tree-based classification, such as using Random Forests to infer medical diagnoses from text \cite{yang_rf_imputation_2018}. However, these approaches often share the same limitations as our regex baseline: they struggle to adapt to semantic variability without extensive feature engineering.
+
+Furthermore, the specific challenge at SickKids manifests as asymmetric label noise, classically modeled as a Positive-Unlabeled (PU) learning problem. Here, documented tests provide reliable positive labels, but undocumented tests conflate true negatives with unobserved external events. Recent clinical PU learning work includes Bayesian mixture modeling for diabetic retinopathy \cite{cerner_pu_2023} and label-recovery frameworks for opioid use disorder diagnoses \cite{pulsnar_oud_2025}. However, across both parametric and non-parametric families \cite{bekker2020learning}, these methods share a common limitation: they treat the unlabeled class as a statistical quantity to be estimated, rather than a clinical question to be resolved through direct evidence extraction. Our approach diverges by leveraging a dynamically constructed Knowledge Graph and LLM pipeline to explicitly resolve this ambiguity before statistical training begins.
+
+\subsection*{Knowledge Graphs and LLMs in Clinical Decision Support}
+Beyond statistical approaches to label noise, a parallel body of work has explored how LLMs and structured knowledge representations can support clinical decision-making directly from unstructured text. LLMs have demonstrated capacity for zero-shot semantic inference, including medical knowledge imputation \cite{yao2025can} and reliable clinical entity recognition from unstructured EHRs \cite{islam2025llm}. However, the deployment of standalone LLMs in clinical decision support is frequently hindered by their propensity for hallucination and a lack of deterministic traceability. To mitigate these risks, the field has increasingly moved toward knowledge-conditioned architectures. For instance, providing structured medical knowledge to an LLM via Retrieval-Augmented Generation (RAG) significantly improves the accuracy of clinical data extraction by grounding the model in validated contexts \cite{li2025automated}. RAG systems have demonstrated speed, accuracy, and traceability advantages in specialized domains such as clinical laboratory regulation \cite{nanua2025retrieval}. Furthermore, integrating LLMs with formal clinical Knowledge Graphs offers a highly scalable platform for real-time analytics by anchoring the model's semantic reasoning in conservative, rule-based associations \cite{cao2026real}. More recently, GraphRAG frameworks have emerged as a unifying architecture that combines the structured reasoning of Knowledge Graphs with the contextual retrieval of RAG, enabling more semantically coherent responses over complex, interconnected knowledge domains \cite{edge2024graphrag, peng2024graphrag}. Nevertheless, existing deployments of this paradigm share important limitations: Knowledge Graphs are typically constructed offline from static corpora, making them brittle to emerging clinical guidelines, while RAG pipelines remain constrained by the quality and coverage of their retrieval indices.
+
+Our framework adopts a GraphRAG architecture, but departs from existing deployments in a clinically important way. Rather than relying on an LLM as an unconstrained oracle, we utilize RAG over published clinical guidelines to dynamically construct an evidence-grounded Knowledge Graph that can be updated as guidelines evolve. To facilitate retrieval, we embed this Knowledge Graph into a vector database, allowing the LLM to query semantically related nodes from clinical triage narratives and map them directly to the deterministic diagnosis-test associations defined by the graph. This ensures our imputation engine benefits from the semantic flexibility of LLMs while remaining grounded in auditable, clinically validated rules.
+
+\subsection*{Meta-Learning for Noisy Labels}
+xxxxx
+
+
+\section{Methods}
+
+We address label noise through two complementary strategies. First, we clean the data by using a LLM to identify and correct false negatives. Second, we make training more robust by implementing LiLAW, a meta-learning method. Better labels reduce noise at the source and robust training manages the residual uncertainty.
+
+\subsection{Label Imputation via Dynamic Knowledge Graph}
+To reliably impute missing diagnostic test labels, we construct a dynamic, evidence-grounded knowledge graph to serve as a clinical ground truth. We use this graph as a semantic imputation engine over the noisy SickKids dataset. By matching a patient's documented diagnosis to the corresponding condition node in the graph, we traverse the \texttt{REQUIRES\_TEST} edges to definitively identify the indicated diagnostic tests. If a strictly indicated test is absent from the patient's EHR, we infer that the test was performed externally and impute a positive label, cleanly correcting the false negative at the source.
+
+\subsubsection{Knowledge Graph Construction}
+
+\paragraph{Curated Ground Truth.}
+To build the foundation of the graph, we employ an LLM to generate baseline triage rules that map clinical observations to conditions and their required diagnostic tests. To mitigate hallucination and ensure strict clinical validity, we ground the LLM using RAG over the EPFL clinical guidelines dataset (\href{https://huggingface.co/datasets/epfl-llm/guidelines}{\texttt{epfl-llm/guidelines}}), utilizing the retrieved guideline texts for in-context learning.
+
+\paragraph{External API Integration.}
+Once the foundational rules are generated, we standardize all extracted entities against recognized medical ontologies using a suite of external APIs. Symptom and finding nodes are grounded via the EMBL-EBI OLS4 API, prioritizing Human Phenotype Ontology (HP), MONDO, and EFO, with synonym terms stored as node attributes to broaden entity matching during retrieval. Condition nodes are annotated with WHO international ICD-10 codes via the UMLS REST API and with ICD-10-CA codes via the Canada Health Infoway FHIR endpoint, reflecting the Canadian clinical context of the project. SNOMED CT CA is resolved via the Canada Health Infoway FHIR endpoint and prioritised given the CTAS guideline context. Diagnostic test nodes are assigned LOINC panel codes using a curated override table validated against UMLS. When no valid mapping is found, nodes retain their plain-text labels; persistent failures are resolved through manual ICD-10 or LOINC overrides applied at build time. A full breakdown of APIs, authentication, and the resulting data schema is provided in Appendix~\ref{app:api_integration}.
+
+\paragraph{Evidence Mining.}
+To further enforce clinical rigor, we enrich the graph's relationships with quantitative literature and trial evidence. Using the Europe PMC API, we calculate and append peer-reviewed article and patent co-occurrence counts to the edges linking symptoms to conditions, and conditions to required tests. Similarly, we query ClinicalTrials.gov to attach relevant clinical trial counts to pharmacological treatment pathways. By embedding these evidence-based weights directly into the graph topology, the system can systematically distinguish between highly validated clinical associations and marginal correlations. A comprehensive mapping of the specific API endpoints, targeted edge types, and resulting schema columns is provided in Appendix~\ref{app:api_integration}.
+
+\paragraph{Clinical Dataset Enrichment.}
+Finally, we enrich the graph's semantic coverage using ClinGraph \cite{johnson2024clinvec}, a 153K-node, $\sim$3M-edge clinical knowledge graph from the Harvard Zitnik Lab spanning SNOMED CT, ICD-10-CM, LOINC, RxNorm, ATC, CPT, and PheCode. This enrichment step serves two purposes. First, it back-fills missing cross-vocabulary codes onto existing nodes by inferring identifiers through established definitional links. Second, it structurally extends our graph by integrating up to 500 first-degree neighboring nodes representing highly related clinical concepts, preserving their original edge directions and relation types. This structural enrichment broadens our ontological coverage far beyond what the guideline-grounded construction captures alone.
+
+\paragraph{Multi-Agent Graph Audit.}
+To validate the clinical integrity of the constructed graph prior to imputation, we implement a four-persona multi-agent auditing pipeline. The unit of audit is a clinical triad. This structural pathway connects a clinical finding to an underlying condition, and subsequently to an indicated test (finding $\rightarrow$ condition $\rightarrow$ test). These pathways are deduplicated and sorted by patient acuity so that the most time-critical sequences are evaluated first. Three distinct personas (Protocol \& Triage Enforcer, Rapid Diagnostics Researcher, and ED Attending) produce independent assessments of each triad. A fourth persona (ED Medical Director) synthesizes these evaluations into a final verdict of \textit{Verified}, \textit{Flagged for Review}, or \textit{Rejected}, alongside a continuous confidence score. Audit results are written back to the graph as edge weights, embedding this clinical consensus directly into the GraphRAG retrieval process. Full details of the persona designs, scoring logic, and hard-flag triggers are provided in Appendix~\ref{app:audit}.
+
+\subsubsection{Imputation Strategies}
+\paragraph{KG String Matching.}
+Our first imputation strategy uses bidirectional substring matching to map free-text patient diagnoses to standardized clinical entity nodes (e.g., symptoms, risk factors) within the Knowledge Graph (KG). Once mapped, we traverse both direct (1-hop) and condition-mediated (2-hop) edges to identify clinically indicated tests. To mitigate false positives caused by broad, generic symptoms, we apply a consensus threshold ($\tau$), requiring a minimum number of independently matched nodes to nominate a test before it is imputed as a positive label. A formal description of this matching and traversal algorithm is provided in Appendix~\ref{app:kg_matching}.
+
+\paragraph{GraphRAG Semantic Retrieval.}
+Our second strategy addresses cases where free-text diagnoses share no surface-level lexical overlap with KG node labels. We employ a GraphRAG approach, embedding clinical terms using a domain-specific biomedical language model and querying them against a vector database indexing the KG. To handle clinical context, we apply a sliding-window negation filter that discards semantic matches if the target concept is negated in the patient's narrative (e.g., preventing ``no chest pain'' from triggering an ECG). Once semantically related nodes are retrieved, graph traversal follows the same 1-hop and 2-hop paths as the lexical strategy. However, rather than utilizing a discrete vote count, each matched node contributes its continuous cosine similarity score to the tests it indicates. Tests are ranked by their aggregated scores, and an aggregate threshold ($\theta$) is applied to determine the final imputed labels. Full details regarding the embedding architecture, negation heuristics, and scoring algorithm are provided in Appendix~\ref{app:semantic_matching}.
+
+\subsection{Robust Training via LiLAW}
+xxxx
+
+\section{Cohort and Experimental Setup}
+To ensure the MLMD system operates under realistic clinical constraints, predictive input features are strictly limited to information available at the moment of triage. Based on the standardized intake process, this feature space includes patient demographics (age, sex, weight), vital signs (pulse, respiration, temperature, blood pressure), chief complaint narratives, and the Canadian Triage and Acuity Scale (CTAS) score. As previously established, the baseline diagnostic labels for these encounters exhibit asymmetric noise. While post-assessment clinical diagnoses (\texttt{dx}) are utilized by our Knowledge Graph pipeline to retrospectively impute missing labels during training, they are explicitly excluded from the model's inference feature space to prevent target leakage.
+
+\subsection{SickKids Cohort Selection}
+This retrospective study utilized electronic health record (EHR) data from pediatric patients (aged 0–18 years) presenting to the SickKids Emergency Department between June 2018 and January 2026. We excluded patients who left without being seen (LWBS) ($n=25,397$), encounters lacking valid triage timestamps ($n=0$), and encounters missing free-text clinical diagnoses necessary for imputation inference ($n=11,396$).
+ 
+Following these exclusions, the final cohort comprised $N = 483,705$ unique ED encounters. The median patient age was 5.0 years (IQR: 2.0–10.0), with a biological sex distribution of 54.1\% male and 45.8\% female. Across the four diagnostic pathways targeted by the MLMD, the baseline prevalence of documented positive labels was as follows: Arm X-Rays ($n = 1,904$), ECGs ($n = 12,236$), Appendix Ultrasounds ($n = 3,293$), and Testicular Ultrasounds ($n = 2,889$).
+
+\subsection{\hl{Evaluation Approach and Study Design}}
+To simulate real-world prospective deployment, the cohort was temporally partitioned: encounters from [Year] to [Year] were used for model training and hyperparameter tuning ($X$\%), while encounters from [Year] were reserved as a holdout testing set ($Y$\%). Because our framework involves both a data-cleaning phase and a predictive phase, our evaluation strategy is bifurcated accordingly.
+
+\paragraph{Label Imputation Evaluation.} 
+First, we evaluate the efficacy of the KG imputation pipeline. The incumbent clinician-validated regex extraction system serves as our high-precision, low-recall baseline. A successful imputation strategy must minimally capture the established regex true positives (ensuring no loss of institutional knowledge) while identifying novel false negatives (unlabeled patients who genuinely required tests). To validate these novel "discoveries" and establish a pristine ground truth for the test set, a clinical domain expert manually conducted a retrospective chart review on a random sample of $n = \text{[Insert Number]}$ newly imputed labels to confirm their clinical validity.
+
+\paragraph{Downstream MLMD Model Evaluation.}
+Second, we evaluate the impact of this label imputation on the downstream predictive MLMD model. We compare the performance of our LiLAW architecture trained on the KG-imputed dataset against three baselines: 1) a classifier trained on the regex-imputed labels, 2) a classifier trained with LiLaw, and 3) a classifier trained on KG-imputed labels. 
+
+Model performance was evaluated using standard classification metrics, prioritized by their operational implications for the ED. Because the primary objective of this framework is to rectify historical False Negatives, \textbf{Recall (Sensitivity)} serves as our primary evaluation metric, quantifying the retrained system's improved ability to successfully parallelize care by capturing patients who require diagnostics. Precision and False Positive Rate (FPR) act as vital safety constraints, ensuring the MLMD does not inadvertently burden ancillary departments (e.g., radiology, cardiology) with unwarranted test authorizations. Finally, we report the Area Under the Receiver Operating Characteristic Curve (AUROC) and the $F_1$-score to capture overall discriminative capability in the presence of severe class imbalance.
+
+\section{Results}
+
+\subsection{Clinical Validation and Integrity of the Knowledge Graph}
+% Show the scale (nodes/edges) and the "Medical Director's" final audit scores.
+% Highlighting high confidence scores here justifies the downstream imputation.
+
+\subsection{Label Imputation and Discovery of Clinical False Negatives}
+
+Because the legacy Regex baseline represents an incomplete ground truth, cases where our models predict a positive label missed by Regex are formally classified as False Positives (FPs). However, in this Positive-Unlabeled (PU) learning context, these practically represent "Discoveries"—potential clinical false negatives where a test was genuinely indicated but missed by rigid lexical rules.
+
+Table~\ref{tab:imputation_results} highlights a stark contrast between lexical and semantic retrieval. The deterministic KG String Matching method exhibited extreme variance. While successful on Appendix Ultrasounds ($F_1$: 0.801), it failed to capture the lexical diversity of Arm X-Rays (Recall: 0.031) and catastrophically over-flagged Testicular Ultrasounds (20,035 discoveries; Precision: 0.048), exposing the limitations of strict matching on overlapping anatomical terms.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Performance of imputation methods compared to the Regex baseline. False Positives (FP) represent potential clinical false negatives, termed ``Discoveries.''}
+    \label{tab:imputation_results}
+    \resizebox{\columnwidth}{!}{%
+    \begin{tabular}{llrrrr}
+        \toprule
+        \textbf{Clinical Pathway} & \textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{$F_1$-Score} & \textbf{Discoveries (FP)} \\
+        \midrule
+        \multirow{2}{*}{ECG} & KG String & 0.786 & 0.871 & 0.827 & 2,900 \\
+        & GraphRAG & \textbf{0.817} & 0.837 & \textbf{0.827} & 2,292 \\
+        \midrule
+        \multirow{2}{*}{Arm X-Ray} & KG String & 0.009 & 0.031 & 0.013 & 6,696 \\
+        & GraphRAG & \textbf{0.139} & \textbf{0.733} & \textbf{0.234} & 8,632 \\
+        \midrule
+        \multirow{2}{*}{Appendix US} & KG String & 0.809 & \textbf{0.793} & \textbf{0.801} & 617 \\
+        & GraphRAG & \textbf{0.870} & 0.198 & 0.322 & 97 \\
+        \midrule
+        \multirow{2}{*}{Testicular US} & KG String & 0.048 & 0.352 & 0.085 & 20,035 \\
+        & GraphRAG & \textbf{0.944} & \textbf{0.521} & \textbf{0.672} & 89 \\
+        \bottomrule
+    \end{tabular}%
+    }
+\end{table}
+
+Conversely, the GraphRAG Semantic Retrieval pipeline demonstrated balanced performance, yielding 11,110 total discoveries. It maintained exceptional precision on Testicular Ultrasounds (0.944) while successfully navigating the variable presentations of Arm X-Rays (Recall: 0.733). 
+
+To ensure these model-generated discoveries represent true clinical needs rather than algorithmic hallucinations, a clinician manually reviewed a random sample. Out of [TODO: Insert Total Sample Size] reviewed discoveries, [TODO: Insert \%]\% were verified as genuinely indicated tests, including an accuracy rate of [TODO: Insert \%]\% for ECGs and [TODO: Insert \%]\% for Arm X-Rays. This confirms that GraphRAG effectively densifies training labels by capturing implicit clinical indications that legacy rules overlook.
+
+\subsection{\hl{Downstream MLMD Performance}}
+We conducted an ablation study across four training paradigms to isolate the impact of our pipeline. As summarized in Table~\ref{tab:downstream_performance}, the baseline is a standard classifier trained on noisy Regex labels, evaluated on a holdout set prioritizing Recall (operational efficiency) and Precision (safety against over-testing). 
+
+\begin{table}[htbp]
+    \centering
+    \caption{Ablation study quantifying downstream MLMD performance across the four training paradigms. Metrics reflect evaluation on the holdout test set.}
+    \label{tab:downstream_performance}
+    \resizebox{\columnwidth}{!}{%
+    \begin{tabular}{lrrrr}
+        \toprule
+        \textbf{Training Paradigm} & \textbf{Precision} & \textbf{Recall} & \textbf{$F_1$-Score} & \textbf{AUROC} \\
+        \midrule
+        Baseline (Regex Labels) & [TODO] & [TODO] & [TODO] & [TODO] \\
+        GraphRAG Imputation Only & [TODO] & [TODO] & [TODO] & [TODO] \\
+        LiLAW Optimization Only & [TODO] & [TODO] & [TODO] & [TODO] \\
+        \textbf{Combined (GraphRAG + LiLAW)} & \textbf{[TODO]} & \textbf{[TODO]} & \textbf{[TODO]} & \textbf{[TODO]} \\
+        \bottomrule
+    \end{tabular}%
+    }
+\end{table}
+
+\paragraph{Impact of Label Imputation.}
+Training exclusively on GraphRAG-imputed labels directly mitigates the Positive-Unlabeled data deficiency. Exposing the model to the 11,110 new discoveries significantly improved its recognition of atypical clinical presentations. Compared to the baseline, this data-level noise resolution increased Recall from [TODO: Baseline Recall]\% to [TODO: Imputation Recall]\% (Table~\ref{tab:downstream_performance}).
+
+\paragraph{Impact of LiLAW Optimization.}
+Applying the LiLAW objective to the noisy Regex baseline evaluated algorithmic noise handling in isolation. LiLAW successfully mitigated overfitting to false negatives, primarily improving discriminative stability. As shown in Table~\ref{tab:downstream_performance}, this yielded a Precision of [TODO: LiLAW Precision]\% and an AUROC of [TODO: LiLAW AUROC]. However, because LiLAW re-weights existing data rather than discovering missing labels, its Recall improvements were inherently constrained.
+
+\paragraph{Combined Efficacy (Label Imputation + LiLAW).}
+The full pipeline—LiLAW optimization applied to the GraphRAG-imputed dataset—yielded the strongest overall performance. This combination provides a powerful synergy: GraphRAG supplies a highly sensitive, densified ground truth, while LiLAW dynamically down-weights residual imputation artifacts during gradient descent. This dual approach achieved an optimal clinical balance, peaking at an $F_1$-score of [TODO: Combined F1] and a Recall of [TODO: Combined Recall]\%, while strictly maintaining the Precision thresholds required for emergency department deployment.
+
+\subsection{Computational Efficiency and Inference Latency}
+To evaluate deployment feasibility, we benchmarked both one-time cold-start initialization and per-patient inference latency using a randomly sampled pool of triage diagnoses. As detailed in Appendix~\ref{app:latency_benchmarks}, the baseline string-matching strategy exhibited negligible overhead (6.16 ms load time, 0.55 ms inference). Conversely, the GraphRAG semantic pipeline incurred higher computational costs due to the local biomedical embedding model, requiring 17.75 seconds for initialization and averaging 175.54 ms per encounter. Although the semantic approach is roughly 320$\times$ slower, both methods process individual triage narratives in under a quarter-second.
+
+\section{Discussion}
+
+\paragraph{Clinical Translation and Deployment Feasibility.}
+To bridge the gap between backend algorithmic inference and operational clinical utility, we developed \textit{Diagnotix}, a proof-of-concept web application. Diagnotix provides an interactive front-end dashboard allowing clinicians to visually explore the force-directed Knowledge Graph, dynamically generate new diagnostic pathways via LLM-driven retrieval, and interrogate clinical reasoning through an evidence-grounded chat interface. To ensure this interface—and the underlying framework—is deployable, we benchmarked inference latency (Appendix~\ref{app:latency_benchmarks}). While the GraphRAG pipeline is over 300$\times$ slower than the baseline, averaging 175 ms per encounter, this computational trade-off is highly manageable. A 175-millisecond latency is functionally instantaneous for end-users interacting with Diagnotix and introduces no systemic bottlenecks for our current retrospective offline imputation. Furthermore, the 17.7-second cold-start is a one-time cost easily absorbed during server spin-up.
+
+\paragraph{Limitations.}
+Despite this operational feasibility, our current approach has several notable limitations. Chiefly, the Knowledge Graph is currently constructed as a point-in-time snapshot. Even with active retrieval from clinical guidelines (e.g., NICE, ACR, AHA/ACC), the underlying LLMs anchor rule generation to their specific training knowledge cutoffs. Because the RAG Qdrant collection is built statically, there is no automated mechanism to detect or flag semantic drift when guidelines are revised, meaning the vector database risks falling behind the active clinical evidence base over time. Furthermore, our semantic pipeline relied exclusively on a single LLM for embeddings; we did not systematically evaluate alternative embedding architectures, which may yield differing sensitivities to nuanced clinical language. Finally, while the automated generation of guideline nodes are efficient, it bypasses formal human-in-the-loop (HITL) verification prior to deployment, placing full reliance on the upstream multi-agent audit to filter hallucinations.
+
+\paragraph{Future Work: Continuous Verification and Prospective Deployment.}
+Future iterations must prioritize resolving semantic drift to ensure long-term clinical safety. We propose implementing a continuous integration (CI) pipeline that periodically re-scrapes target guideline URLs, re-indexes the Qdrant database, and flags divergent rules for review. To address the lack of human oversight, this process should culminate in a lightweight review queue (e.g., a web UI integrated within Diagnotix or a structured pull request) where clinical experts must explicitly approve generated rule batches before they commit to the live graph.
+
+Once continuous verification is established, our primary objective is to transition the Knowledge Graph from offline retrospective imputation to live prospective clinical decision support directly at triage. By inferring required diagnostics from presenting symptoms prior to physician assessment, the system could proactively parallelize ED workflows. In this high-throughput, forward-predictive setting, computational efficiency will become critical. Future work will explore embedding model quantization, vector caching, and smaller distilled language models to optimize the semantic pipeline's current 175-millisecond latency and scale the system cost-effectively across multi-facility deployments.
+
+
+% ACKNOWLEDGEMENTS ONLY GO IN THE CAMERA-READY, NOT THE SUBMISSION
+\acks{We gratefully acknowledge Dr. Anna Goldenberg and Ismail Akrout for their continued mentorship and support on this project, which was conducted as part of the course LMP2392: Healthcare and Medicine Basics for AI Experts, in collaboration with SickKids.}
+
+%Do NOT change font size of references or modify the bibliography style
+\bibliography{sample}
+
+\newpage
+\appendix
+
+\section{Author Contributions}
+\label{app:contributions}
+A detailed breakdown of team responsibilities, encompassing both the technical implementation and manuscript authorship, is provided in Table~\ref{tab:contributions}. For full transparency regarding project development and individual technical contributions, the complete source code and commit history are openly accessible via \href{https://github.com/biswurmt/mlmd-noise/graphs/contributors}{GitHub}.
+
+\begin{table}[ht]
+\centering
+\caption{Detailed Breakdown of Teammate Contributions}
+\label{tab:contributions}
+\begin{tabularx}{\textwidth}{@{} l l X @{}}
+\toprule
+\textbf{Report Section} & \textbf{Primary Author} & \textbf{Technical Contribution} \\ 
+\midrule
+
+Introduction & Alice & Main narrative and generalizable healthcare insights. \\ \addlinespace
+
+\multirow{2}{*}{Related Work} & Alice & Label Imputation in EHRs; Knowledge Graphs and LLMs. \\
+& Tyler & Meta-Learning for Noisy Labels. \\ \addlinespace
+
+Cohort \& Setup & Alice & Cohort selection, exclusions, and experimental design. \\ \addlinespace
+
+\midrule
+\textbf{Methods} & & \\
+Label Imputation & Alice & Dynamic Knowledge Graph construction, Multi-Agent Graph Audit and Imputation Strategies. \\
+Robust Training & Tyler & Formulation and implementation of LiLAW. \\ \addlinespace
+
+\midrule
+\textbf{Results} & & \\
+Validation \& Discoveries & Alice & KG clinical validation and discovery of clinical false negatives. \\
+MLMD Performance & Alice \& Tyler & \textbf{Alice:} Impact of Label Imputation. \newline \textbf{Tyler:} Impact of LiLAW Optimization and Combined Efficacy. \\
+Efficiency Benchmarks & Alice & Computational efficiency and inference latency. \\ \addlinespace
+
+\midrule
+Discussion & ??? & Joint interpretation of findings and future work proposals. \\ 
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\newpage
+\section{Ontology Enrichment via External APIs}
+\label{app:api_integration}
+To ensure interoperability and standardize clinical entities, our pipeline queries 
+eight external APIs to attach standard medical codes and evidence metadata to each 
+extracted record. Table~\ref{tab:api_breakdown} outlines this sequential enrichment process.
+\begin{table}[htbp]
+    \centering
+    \caption{Detailed breakdown of the API integration steps, targeted ontologies, 
+    and resulting dataset schema modifications.}
+    \label{tab:api_breakdown}
+    \begin{tabular}{c p{0.25\textwidth} p{0.15\textwidth} p{0.20\textwidth} p{0.25\textwidth}}
+        \toprule
+        \textbf{Step} & \textbf{API (Target Ontology)} & \textbf{Credential} & 
+        \textbf{Enriched Entity} & \textbf{Column(s) Added} \\
+        \midrule
+        2 & \href{https://www.ebi.ac.uk/ols4}{EMBL-EBI OLS4} \newline (HP/MONDO/EFO) 
+          & None 
+          & \texttt{raw\_symptom} 
+          & \texttt{ebi\_name}, \texttt{ebi\_code}, \texttt{synonyms} \\
+        \addlinespace
+        3 & \href{https://infocentral.infoway-inforoute.ca/en/advanced-users}{Canada Health 
+            Infoway FHIR} (SNOMED CT CA) 
+          & OAuth2 client credentials 
+          & \texttt{raw\_symptom} 
+          & \texttt{infoway\_name}, \texttt{infoway\_code} \\
+        \addlinespace
+        4 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API} 
+            \newline (LOINC) 
+          & \texttt{UMLS\_API\_KEY} 
+          & \texttt{test} \newline (unique values only) 
+          & \texttt{loinc\_code} \\
+        \addlinespace
+        5 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API} 
+            \newline (ICD-10, WHO international) 
+          & \texttt{UMLS\_API\_KEY} 
+          & \texttt{condition} \newline (unique values only) 
+          & \texttt{icd10\_code} \\
+        \addlinespace
+        6 & \href{https://infocentral.infoway-inforoute.ca/en/advanced-users}{Canada Health 
+            Infoway FHIR} (ICD-10-CA) 
+          & OAuth2 client credentials 
+          & \texttt{condition} \newline (unique values only) 
+          & \texttt{icd10ca\_code} \\
+        \addlinespace
+        7 & \href{https://lhncbc.nlm.nih.gov/RxNav/APIs/index.html}{NLM RxNorm} \& 
+            \newline \href{https://open.fda.gov/apis/}{OpenFDA} 
+          & None 
+          & \texttt{treatment} \newline (where present) 
+          & \texttt{rxcui}, \texttt{adverse\_event} \\
+        \addlinespace
+        8 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API} 
+          & None 
+          & \texttt{symptom} $\rightarrow$ \texttt{condition} \newline 
+            (\texttt{INDICATES\_CONDITION})
+          & \texttt{literature\_articles}, \texttt{literature\_patents} \\
+        \addlinespace
+        9 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API} 
+          & None 
+          & \texttt{condition} $\rightarrow$ \texttt{test} \newline 
+            (\texttt{REQUIRES\_TEST})
+          & \texttt{literature\_articles}, \texttt{literature\_patents} \\
+        \addlinespace
+        10 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API} 
+          & None 
+          & \texttt{symptom} $\rightarrow$ \texttt{test} \newline 
+            (\texttt{DIRECTLY\_INDICATES\_TEST})
+          & \texttt{literature\_articles}, \texttt{literature\_patents} \\
+        \addlinespace
+        11 & \href{https://clinicaltrials.gov/api/gui}{ClinicalTrials.gov v2} 
+          & None 
+          & \texttt{condition} $\rightarrow$ \texttt{treatment} \newline 
+            (\texttt{RECOMMENDS\_TREATMENT})
+          & \texttt{trial\_count} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Multi-Agent Graph Audit Pipeline}
+\label{app:audit}
+
+\subsection*{Audit Unit and Triad Extraction}
+The unit of audit is a clinical triad: a (finding $\rightarrow$ condition $\rightarrow$ 
+test) path extracted by traversing \texttt{INDICATES\_CONDITION} followed by 
+\texttt{REQUIRES\_TEST} edges. Three-hop paths are preferred over 
+\texttt{DIRECTLY\_INDICATES\_TEST} shortcuts because they carry condition context 
+necessary for clinical validation. Triads are deduplicated on (finding, test) pairs and 
+sorted by clinical acuity (HIGH $\rightarrow$ MODERATE $\rightarrow$ STANDARD) to 
+prioritise the most time-critical pathways.
+
+\subsection*{Persona Descriptions}
+Four personas operate sequentially on each triad. Personas A--C produce independent 
+assessments with no shared context at inference time; Persona D synthesizes their outputs 
+into a final verdict.
+
+\paragraph{Persona A — Protocol \& Triage Enforcer.}
+The only persona with external tool access. Persona A queries a local ChromaDB vector database built from the EPFL clinical guidelines dataset, retrieving the top-5 most relevant passages via semantic search filtered by test type. Outputs include a structured \texttt{support\_level} (\textit{strong} $|$ \textit{moderate} $|$ \textit{weak} $|$ \textit{none}), a matched guideline reference, whether a validated clinical decision rule is required before ordering, and a Choosing Wisely flag.
+
+\paragraph{Persona B — Rapid Diagnostics Researcher.}
+Operates without an LLM. Persona B queries Semantic Scholar for literature co-evidence on the condition--test pair (with Europe PMC as fallback), returning paper count, mean publication year (classified as \textit{current} $\geq$ 2020, \textit{aging} $\geq$ 2015, \textit{outdated} $<$ 2015), and keyword flags indicating whether point-of-care alternatives or negative predictive value evidence appear in retrieved abstracts.
+
+\paragraph{Persona C — ED Attending.}
+A pure LLM call with no tool access. Persona C evaluates clinical flow pragmatics: 
+over-testing, under-testing, safe discharge logic, wrong-test detection, and whether the pathway constitutes never-event mitigation — i.e., whether the test is mandated to catch a catastrophic, time-sensitive diagnosis.
+
+\paragraph{Persona D — ED Medical Director.}
+Receives the full structured outputs of Personas A, B, and C and synthesizes a final \texttt{audit\_status} (\textit{Verified} $|$ \textit{Flagged for Review} $|$ \textit{Rejected}) and a \texttt{confidence\_score} $\in [0, 1]$. The weighting scheme is explicit: Persona A carries the dominant weight; Persona B adjusts confidence by up to $\pm 0.15$ based on literature recency and paper count; Persona C's \texttt{pathway\_is\_never\_event\_mitigation} flag adds $+0.10$, while \texttt{wrong\_test\_concern} is a hard-flag trigger regardless of other scores.
+
+\subsection*{Hard-Flag Triggers}
+Three conditions unconditionally produce a \textit{Flagged for Review} verdict, bypassing 
+the scoring logic:
+\begin{enumerate}
+    \item Persona C raises \texttt{wrong\_test\_concern}, indicating a genuine clinical 
+    error in the KG.
+    \item Persona A raises a Choosing Wisely flag.
+    \item A rule-out pathway has zero guideline support and zero literature evidence 
+    simultaneously.
+\end{enumerate}
+
+\subsection*{Audit Metadata and Checkpointing}
+Audit results are written back to the graph in-place. Each audited edge receives 
+\texttt{audit\_status}, \texttt{confidence\_score}, \texttt{last\_audited}, persona-level 
+sub-scores, and \texttt{audit\_rationale} as edge attributes, making results queryable 
+during GraphRAG retrieval. A complete \texttt{audit\_report.json} is also produced 
+containing per-triad detail and a summary of verified, flagged, and rejected counts with 
+mean confidence. To manage LLM call volume over a fully enumerated graph, completed 
+triad results are cached and skipped on re-invocation via a \texttt{--resume} flag.
+
+\section{Detailed Imputation Methodologies}
+
+\subsection*{Knowledge Graph Traversal Algorithm}
+\label{app:kg_matching}
+To map unstructured patient records to the Knowledge Graph (KG) and impute missing diagnostic labels, we employ the deterministic substring matching and graph traversal algorithm detailed in Algorithm \ref{alg:kg_imputation}. The algorithm relies on a bidirectional substring check to capture clinical shorthand and traverses both direct (1-hop) and condition-mediated (2-hop) edges to identify indicated tests.
+
+\begin{algorithm}[htbp]
+\caption{Knowledge Graph Entity Matching and Test Imputation}
+\label{alg:kg_imputation}
+\KwIn{Patient diagnosis string $D$, Knowledge Graph $G=(V, E)$, minimum node threshold $\tau$}
+\KwOut{Set of imputed diagnostic tests $P$}
+
+$T \gets \text{Split}(D, \text{";"})$ \tcp*{Isolate terms from compound diagnosis}
+$M \gets \emptyset$ \tcp*{Initialize set of matched KG nodes}
+
+\BlankLine
+\textbf{Step 1: Bidirectional Substring Matching}\;
+\ForEach{$t \in T$}{
+    $t \gets \text{Lowercase}(\text{Strip}(t))$\;
+    \ForEach{$v \in V$}{
+        \If{$\text{Type}(v) \in \{\text{Condition, Symptom, Risk\_Factor, ...}\}$}{
+            $L \gets \text{Lowercase}(\text{Label}(v))$\;
+            \If{$t \subseteq L \lor L \subseteq t$}{
+                $M \gets M \cup \{v\}$\;
+            }
+        }
+    }
+}
+
+\BlankLine
+\textbf{Step 2: Graph Traversal and Test Voting}\;
+$TestCounts \gets \text{Empty Map}$ \tcp*{Tracks how many unique nodes indicate a test}
+
+\ForEach{$m \in M$}{
+    $TestsForM \gets \emptyset$\;
+    
+    \ForEach{outgoing edges $(m, u) \in E$}{
+        \uIf{$\text{Relation}(m, u) \in \{\text{\small REQUIRES\_TEST}, \text{\small DIRECTLY\_INDICATES\_TEST}\}$}{
+            $TestsForM \gets TestsForM \cup \{u\}$ \tcp*{1-hop traversal}
+        }
+        \ElseIf{$\text{Relation}(m, u) == \text{\small INDICATES\_CONDITION}$}{
+            \ForEach{outgoing edges $(u, w) \in E$}{
+                \If{$\text{Relation}(u, w) == \text{\small REQUIRES\_TEST}$}{
+                    $TestsForM \gets TestsForM \cup \{w\}$ \tcp*{2-hop traversal}
+                }
+            }
+        }
+    }
+    
+    \ForEach{$test \in TestsForM$}{
+        $TestCounts[test] \gets TestCounts[test] + 1$\;
+    }
+}
+
+\BlankLine
+\textbf{Step 3: Threshold Filtering}\;
+$P \gets \{test \mid TestCounts[test] \ge \tau\}$\;
+\Return $P$\;
+\end{algorithm}
+
+\subsection*{Semantic Retrieval and Score Aggregation}
+\label{app:semantic_matching}
+To capture semantic nuance beyond exact string matching, we embed the Knowledge Graph nodes into a local ChromaDB vector store using the \texttt{sentence-transformers} biomedical model (MedEmbed/MedEIR). Patient diagnosis strings are similarly embedded and queried against this space. 
+
+As detailed in Algorithm \ref{alg:semantic_imputation}, we convert the returned vector distances to cosine similarities. Matches below a baseline semantic threshold ($s_{min}$) are discarded. Crucially, before accepting a semantic match, a heuristic negation filter scans a six-token window preceding the matched label in the original text. If a negation token (e.g., \textit{no, not, denies, without, absent, negative for, rules out}) is detected, the match is discarded. Finally, we traverse the graph to identify indicated tests. Instead of a discrete vote, we sum the cosine similarity scores of all nodes recommending a specific test and filter the final set using an aggregate score threshold ($\theta$).
+
+\begin{algorithm}[htbp]
+\caption{GraphRAG Semantic Retrieval and Score-Based Imputation}
+\label{alg:semantic_imputation}
+\KwIn{Patient diagnosis $D$, Knowledge Graph $G=(V, E)$, Vector Store $\mathcal{V}$, thresholds $k, s_{min}, \theta$}
+\KwOut{Set of imputed diagnostic tests $P$}
+
+$T \gets \text{Split}(D, \text{";"})$ \tcp*{Isolate terms from compound diagnosis}
+$M \gets \text{Empty Map}$ \tcp*{Tracks maximum semantic score per matched KG node}
+
+\BlankLine
+\textbf{Step 1: Vector Search and Negation Filtering}\;
+\ForEach{$t \in T$}{
+    $E_t \gets \text{Embed}(t)$\;
+    $Candidates \gets \text{QueryVectorStore}(\mathcal{V}, E_t, \text{top\_k}=k)$\;
+    
+    \ForEach{$c \in Candidates$}{
+        $score \gets 1.0 - c.\text{distance}$ \tcp*{Convert distance to cosine similarity}
+        
+        \uIf{$score \ge s_{min}$}{
+            \If{\textbf{not} $\text{IsNegated}(D, c.\text{label}, \text{window}=6)$}{
+                \tcp{Retain the highest similarity score if node matched multiple times}
+                $M[c.\text{node}] \gets \max(M.get(c.\text{node}, 0), score)$\;
+            }
+        }
+    }
+}
+
+\BlankLine
+\textbf{Step 2: Graph Traversal and Score Aggregation}\;
+$TestScores \gets \text{Empty Map}$ \tcp*{Tracks aggregate cosine score per test}
+
+\ForEach{$(m, score) \in M$}{
+    $TestsForM \gets \emptyset$\;
+    
+    \ForEach{outgoing edges $(m, u) \in E$}{
+        \uIf{$\text{Relation}(m, u) \in \{\text{\small REQUIRES\_TEST}, \text{\small DIRECTLY\_INDICATES\_TEST}\}$}{
+            $TestsForM \gets TestsForM \cup \{u\}$\;
+        }
+        \ElseIf{$\text{Relation}(m, u) == \text{\small INDICATES\_CONDITION}$}{
+            \ForEach{outgoing edges $(u, w) \in E$}{
+                \If{$\text{Relation}(u, w) == \text{\small REQUIRES\_TEST}$}{
+                    $TestsForM \gets TestsForM \cup \{w\}$\;
+                }
+            }
+        }
+    }
+    
+    \ForEach{$test \in TestsForM$}{
+        $TestScores[test] \gets TestScores.get(test, 0) + score$\;
+    }
+}
+
+\BlankLine
+\textbf{Step 3: Aggregate Thresholding}\;
+$P \gets \{test \mid TestScores[test] \ge \theta\}$\;
+\Return $P$\;
+\end{algorithm}
+
+\section{Computational Latency Benchmarks}
+\label{app:latency_benchmarks}
+
+To isolate the computational bottleneck within the GraphRAG semantic pipeline, our benchmarking separated the inference process into two phases: entity matching (embedding generation and vector search) and graph traversal (score aggregation and test imputation). 
+
+Table~\ref{tab:latency_benchmarks} demonstrates that the overwhelming majority of the latency in the semantic pipeline occurs during Phase 1, driven by the computational cost of the local biomedical embedding model. The subsequent graph traversal (Phase 2) adds only minimal overhead ($\sim$37 ms) compared to the initial vector search.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Computational latency benchmarks comparing the baseline lexical string matching strategy against the GraphRAG semantic retrieval pipeline. Measurements represent the mean latency across 50 iterations for the matching phase and 25 iterations for the full end-to-end pipeline.}
+    \label{tab:latency_benchmarks}
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Metric} & \textbf{String Matching} & \textbf{Semantic (GraphRAG)} \\
+        \midrule
+        \textbf{Cold-Start Initialization} & & \\
+        \hspace{3mm} KG Pickle / Model Load & 6.16 ms & 17,745.32 ms \\
+        \addlinespace
+        \textbf{Per-Encounter Latency} & & \\
+        \hspace{3mm} Phase 1: Entity Matching Only & 0.42 ms & 137.92 ms \\
+        \hspace{3mm} Phase 2: Full Pipeline (w/ Traversal) & 0.55 ms & 175.54 ms \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Diagnotix Web Application Architecture}
+\label{app:diagnotix}
+
+Diagnotix is built on a modern, high-performance stack utilizing React 19, TypeScript, and Vite for the frontend, coupled with a Python 3.12 FastAPI backend. The system supports Large Language Model (LLM) integration through both Nebius (Kimi-K2.5-fast) and Azure OpenAI. To facilitate distinct clinical workflows, the application is bifurcated into two primary operational modes: \textit{Navigate} and \textit{Analyze}.
+
+\subsection{Navigate Mode}
+Navigate Mode serves as the default visual exploration interface for the clinical knowledge graph. Key features include:
+\begin{itemize}
+    \item \textbf{Interactive Graph Canvas:} A force-directed 2D visualization of the triage knowledge graph powered by \texttt{react-force-graph-2d}.
+    \item \textbf{Pathway Picker:} Allows users to select specific diagnostic tests (e.g., ECG, Appendix Ultrasound) to filter the visualization down to its 1-hop subgraph. An "All Pathways" option reveals the full macroscopic structure.
+    \item \textbf{Node Search \& Legend:} Facilitates node search by label to focus specific subgraphs, alongside an interactive legend to toggle node-type visibility.
+    \item \textbf{Dynamic Pathway Generation:} Users can input a novel diagnostic test (e.g., CT Head), triggering an automated backend LLM pipeline. This pipeline grounds itself using RAG via Qdrant and live Semantic Scholar abstracts to generate 8--15 triage rules (with up to 3 convergence iterations). It appends these to the system's baseline rules and rebuilds the Knowledge Graph. For a seamless user experience, only the delta (new nodes and edges) is appended to the canvas, avoiding full page reloads.
+\end{itemize}
+
+\subsection{Analyze Mode}
+Analyze Mode provides a deeper, conversational interface tailored to specific diagnostic pathways. Switching to this mode opens a dedicated chat thread with the following capabilities:
+\begin{itemize}
+    \item \textbf{Contextual Injection:} The selected pathway's specific subgraph (nodes and edges) is injected directly into the LLM context window.
+    \item \textbf{Evidence-Grounded Generation:} Responses are generated by Nebius Kimi-K2.5-fast and enriched by RAG retrieval from clinical guidelines (Qdrant) and live Semantic Scholar abstracts, ensuring all outputs are cited and grounded in medical literature.
+    \item \textbf{State Management:} The application preserves multi-turn conversation history uniquely for each pathway.
+\end{itemize}
+
+\subsection{Backend API Specifications}
+The FastAPI backend orchestrates graph retrieval and LLM interactions. The core endpoints are summarized in Table~\ref{tab:api_endpoints}.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Diagnotix Backend API Endpoints}
+    \label{tab:api_endpoints}
+    \resizebox{\columnwidth}{!}{%
+    \begin{tabular}{ll}
+        \toprule
+        \textbf{Endpoint} & \textbf{Purpose} \\
+        \midrule
+        \texttt{GET /api/tests} & Retrieve a list of all diagnostic test nodes. \\
+        \addlinespace
+        \texttt{GET /api/graph?pathway=<name>} & Retrieve the full graph or a specific 1-hop pathway subgraph. \\
+        \addlinespace
+        \texttt{POST /api/add\_test} & Execute the LLM pipeline to generate rules and return the node/edge diff. \\
+        \addlinespace
+        \texttt{POST /api/chat} & Initialize clinical chat with RAG and Semantic Scholar grounding. \\
+        \bottomrule
+    \end{tabular}%
+    }
+\end{table}
+
+\end{document}

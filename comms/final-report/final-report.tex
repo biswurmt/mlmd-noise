@@ -1,0 +1,51 @@
+%% final-report.tex
+%% Reading between the lines: LLM-based label imputation and meta-learning for noisy labels in emergency department triage
+%% LMP2392H · Healthcare and Medicine Basics for AI Experts · University of Toronto · April 2026
+%%
+%% Authors: Alice Chua, Tyler Biswurm
+
+\documentclass{styles/minimal}
+
+\usepackage{enumitem}
+
+%% Set PDF metadata
+\hypersetup{
+  pdftitle={Reading between the lines: LLM-based label imputation and meta-learning for noisy labels in emergency department triage},
+  pdfauthor={Chua, Biswurm}
+}
+\setlist[enumerate]{topsep=2pt,itemsep=2pt,parsep=0pt,partopsep=0pt,leftmargin=*}
+\makeatletter
+\AtBeginDocument{
+  \@ifpackageloaded{caption}{
+    \captionsetup[figure]{skip=4pt}
+    \captionsetup[table]{skip=4pt}
+  }{}
+}
+\makeatother
+
+\begin{document}
+
+\title{Reading between the lines: LLM-based label imputation and meta-learning for noisy labels in emergency department triage}
+
+\author{Alice Chua and Tyler Biswurm}
+
+%% ── Title Page Material ──────────────────────────────────────────────────────
+\input{sections/00-abstract}
+\keywords{label noise, clinical decision support, machine learning, label imputation, meta-learning}
+\maketitle
+
+%% ── Body ──────────────────────────────────────────────────────────────────────
+\input{sections/01-introduction-clinical-motivation}
+\input{sections/02-related-work}
+\input{sections/03-data-and-setting}
+\input{sections/04-methods}
+\input{sections/05-evaluation}
+\input{sections/06-results}
+\input{sections/07-discussion-and-limitations}
+\input{sections/08-future-work}
+
+%% ── References ────────────────────────────────────────────────────────────────
+\clearpage
+\bibliography{references}
+
+\end{document}

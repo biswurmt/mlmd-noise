@@ -1,0 +1,53 @@
+\section{Methods}
+
+\subsection{Label imputation via Knowledge Graph}
+
+The label imputation pipeline constructs an evidence-grounded Knowledge Graph (KG) mapping ICD-10 diagnosis codes to clinically indicated diagnostic tests. When a patient's post-assessment diagnosis maps to a test but the encounter lacks a positive label for that test, the label is imputed positive. Imputation runs offline over the training set only; no diagnosis codes are available at inference time.
+
+\paragraph{Knowledge Graph construction.}
+The graph is built in four stages. GPT-5-mini generates initial triage rules grounded via RAG over the EPFL clinical guidelines dataset. All entities are then standardized to recognized medical ontologies: symptom nodes receive HP and MONDO terms; condition nodes receive WHO ICD-10 and ICD-10-CA codes; test nodes receive LOINC panel codes. Edges are weighted with literature co-occurrence counts (Europe PMC) and clinical trial counts (ClinicalTrials.gov) to distinguish well-supported associations from marginal ones. Finally, ClinGraph~\cite{johnson_clinvec_2024}, a 153K-node, ${\sim}$3M-edge clinical knowledge graph spanning SNOMED CT, ICD-10-CM, LOINC, and RxNorm, back-fills missing cross-vocabulary codes and adds up to 500 first-degree neighbor nodes per existing node.
+
+\paragraph{Multi-agent audit.}
+Before imputation, every diagnosis-to-test pathway is validated by a four-persona audit pipeline. Three independent personas evaluate each triad: a Protocol \& Triage Enforcer with RAG access over clinical guidelines, a Rapid Diagnostics Researcher querying live literature databases, and an ED Attending evaluating clinical flow pragmatics. A fourth persona, the ED Medical Director, synthesizes these assessments into a verdict (\textit{Verified}, \textit{Flagged for Review}, or \textit{Rejected}) and a confidence score in $[0, 1]$. Pathways with genuine clinical errors, Choosing Wisely flags, or zero evidence support are unconditionally flagged. Audit outcomes are written back as edge attributes.
+
+\paragraph{Imputation strategies.}
+We evaluate two retrieval strategies. \textit{KG String Matching} uses bidirectional substring matching to map patient diagnosis strings to KG nodes, then traverses 1-hop and 2-hop edges to identify indicated tests. A minimum-node threshold $\tau$ requires at least $\tau$ independently matched nodes before imputation, reducing false positives from broad symptom matches. \textit{GraphRAG Semantic Retrieval} embeds KG nodes and patient diagnoses using the MedEmbed biomedical language model against a ChromaDB vector store to capture cases without lexical overlap. A sliding-window negation filter discards matches where the clinical concept is negated (e.g., ``no chest pain'' does not trigger ECG imputation), and indicated tests are ranked by aggregate cosine similarity and filtered by a threshold $\theta$.
+
+\subsection{Noise-aware training via LiLAW}
+
+Label imputation corrects false negatives where a post-assessment diagnosis conclusively implies a test was needed. It cannot resolve ambiguous cases: chest pain sometimes warrants an ECG and sometimes does not. Residual false negatives remain in both the original and imputed training sets. LiLAW (Lightweight Learnable Adaptive Weighting)~\cite{moturu_lilaw_2025} handles this residual noise by learning to down-weight samples whose observed label is inconsistent with the model's predictions.
+
+\paragraph{Sample difficulty and weight functions.}
+
+Let $s_i = \mathrm{softmax}(f_\theta(x_i))$ be the model's output for training sample $i$ with observed label $\tilde{y}_i$. LiLAW characterizes each sample by the predicted probability of the observed label $s_i[\tilde{y}_i]$ and peak class confidence $\max(s_i)$, defining three regimes:
+
+\begin{itemize}
+    \item \textit{Easy}: $s_i[\tilde{y}_i] = \max(s_i)$ and $\max(s_i)$ is high. The model agrees with the observed label confidently.
+    \item \textit{Moderate}: $\max(s_i)$ is low regardless of agreement. The model is uncertain.
+    \item \textit{Hard}: $s_i[\tilde{y}_i] < \max(s_i)$ and $\max(s_i)$ is high. The model confidently predicts a different class — the signature of a likely mislabelled sample.
+\end{itemize}
+
+Hard samples correspond precisely to the false negatives that remain after imputation: encounters where the model assigns high probability to ``test needed'' but the training label records ``test not performed.'' LiLAW introduces three scalar meta-parameters, $\alpha$, $\beta$, and $\delta$, each governing a weight function:
+
+\begin{align}
+    \mathcal{W}_\alpha &= \sigma\!\left(\alpha \cdot s_i[\tilde{y}_i] - \max(s_i)\right) \\
+    \mathcal{W}_\beta  &= \sigma\!\left(-\left(\beta \cdot s_i[\tilde{y}_i] - \max(s_i)\right)\right) \\
+    \mathcal{W}_\delta &= \exp\!\left(-\frac{\left(\delta \cdot s_i[\tilde{y}_i] - \max(s_i)\right)^2}{2}\right)
+\end{align}
+
+$\mathcal{W}_\alpha$ is a sigmoid high for easy samples; $\mathcal{W}_\beta$ is an inverted sigmoid high for hard samples; $\mathcal{W}_\delta$ is a radial basis function centered on the moderate regime. The total weight $\mathcal{W} = \mathcal{W}_\alpha + \mathcal{W}_\beta + \mathcal{W}_\delta$ scales the loss: $\mathcal{L}_W = \mathcal{W} \cdot \mathcal{L}$. Learning $\alpha$, $\beta$, and $\delta$ allows the model to adapt which difficulty regime to emphasize at each training stage.
+
+\paragraph{Bilevel optimization.}
+
+Meta-parameters are learned via bilevel optimization. Each mini-batch alternates two steps: model parameters $\theta$ update on the weighted training loss $\mathcal{L}_W$ with meta-parameters frozen; then $\theta$ is frozen and the meta-parameters update by SGD on a validation mini-batch. The joint objective is:
+
+\begin{align}
+    \theta^* &= \arg\min_{\theta}\; \sum_{(x_i, \tilde{y}_i) \in \mathcal{D}_t} \mathcal{L}_{W_{\alpha^*,\beta^*,\delta^*}} \notag \\
+    \text{s.t.}\quad \alpha^*, \beta^*, \delta^* &= \arg\min_{\alpha,\beta,\delta}\; \sum_{(x_j, \tilde{y}_j) \in \mathcal{D}_v} \mathcal{L}_{W_{\theta^*}}
+\end{align}
+
+The validation set $\mathcal{D}_v$ does not need to be clean. Accuracy on a held-out noisy set is an unbiased estimator of accuracy under the noisy distribution~\cite{moturu_lilaw_2025}, so LiLAW steers training using the same validation partition as early stopping, a critical property where a clean-labelled EHR subset is unavailable. Meta-parameters initialize at $\alpha = 10.0$, $\beta = 2.0$, $\delta = 6.0$ and update by SGD (lr $= 0.005$, weight decay $10^{-4}$) after a single warmup epoch of standard BCE loss.
+
+\subsection{Combined approach}
+
+In the combined condition, LiLAW training is applied to the GraphRAG-imputed dataset. The two interventions target complementary failure modes. GraphRAG corrects the deterministic subset of false negatives, where a documented diagnosis clearly implies a test was needed. LiLAW handles the residual probabilistic uncertainty, down-weighting samples whose loss magnitude during training suggests misclassification. Imputation reduces the noise rate; LiLAW adapts to whatever noise remains.

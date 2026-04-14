@@ -1,0 +1,102 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{Knowledge Graph integrity}
+% [MISSING: KG clinical validation statistics. Alice to provide:
+%   - Total node count and edge count of the final graph
+%   - Breakdown of audit verdicts: n Verified / Flagged for Review / Rejected
+%   - Mean confidence score across verified pathways
+%   - Any statistics on ontology coverage (fraction of conditions with ICD-10/SNOMED CT codes)
+%  This section justifies the downstream imputation by demonstrating the graph's clinical rigor.]
+\textbf{[TODO: Alice to draft once KG validation statistics are compiled.]}
+
+\subsection{Label imputation performance}
+
+Table~\ref{tab:imputation_results} compares the two imputation strategies against the regex baseline across all four diagnostic pathways.
+
+KG String Matching showed extreme variance. It performed well on Appendix Ultrasounds ($F_1 = 0.801$) where documentation is standardized, but failed on Arm X-Rays (Recall: 0.031) and Testicular Ultrasounds (Precision: 0.048, 20,035 discoveries) where anatomical terms overlap with unrelated symptom descriptions.
+
+GraphRAG Semantic Retrieval was more consistent: 0.944 precision on Testicular Ultrasounds and 0.733 recall on Arm X-Rays, recovering presentations that lexical matching missed. The exception was Appendix Ultrasounds (recall 0.198), where the embedding space flattens distinctions that substring matching preserves in this narrowly documented pathway. GraphRAG identified 11,110 total discoveries; chart review of $n = \text{[TODO]}$ sampled cases confirmed [TODO]\% as genuinely indicated tests.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Performance of both imputation strategies against the regex baseline. ``Discoveries'' are novel positive imputations absent from the regex baseline; in this Positive-Unlabeled setting they represent potential clinical false negatives.}
+    \label{tab:imputation_results}
+    \small
+    \begin{tabular}{llrrrr}
+        \toprule
+        \textbf{Pathway} & \textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{$F_1$} & \textbf{Discoveries} \\
+        \midrule
+        ECG              & KG String  & 0.786 & 0.871 & 0.827 & 2,900 \\
+        ECG              & GraphRAG   & \textbf{0.817} & 0.837 & \textbf{0.827} & 2,292 \\
+        \midrule
+        Arm X-Ray        & KG String  & 0.009 & 0.031 & 0.013 & 6,696 \\
+        Arm X-Ray        & GraphRAG   & \textbf{0.139} & \textbf{0.733} & \textbf{0.234} & 8,632 \\
+        \midrule
+        Appendix US      & KG String  & 0.809 & \textbf{0.793} & \textbf{0.801} & 617  \\
+        Appendix US      & GraphRAG   & \textbf{0.870} & 0.198 & 0.322 & 97   \\
+        \midrule
+        Testicular US    & KG String  & 0.048 & 0.352 & 0.085 & 20,035 \\
+        Testicular US    & GraphRAG   & \textbf{0.944} & \textbf{0.521} & \textbf{0.672} & 89  \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{LiLAW proxy validation}
+
+\paragraph{Tabular asymmetric noise benchmarks.}
+
+We validated LiLAW on three tabular binary classification benchmarks under synthetically injected asymmetric positive-to-negative noise, mirroring the MLMD structure. A 5-layer MLP was trained at four noise rates (10--40\%) with noise confined to train and validation splits; results are averaged over three seeds with a 55/15/30 split.
+
+Adult Income (48,842 samples, 14 features) most closely matches the MLMD problem: mixed continuous and categorical features with moderate class imbalance. LiLAW improved PR-AUC by 1.2--2.9 percentage points across all four noise rates, with gains generally scaling with noise rate (Table~\ref{tab:poc_adult}).
+
+\begin{table}[htbp]
+    \centering
+    \caption{LiLAW proxy validation on Adult Income with asymmetric positive-to-negative noise. PR-AUC and Recall at PPV $\geq$ 0.80 (Rec@PPV80), mean $\pm$ std over 3 seeds.}
+    \label{tab:poc_adult}
+    \small
+    \begin{tabular}{lrrrrr}
+        \toprule
+        \textbf{Noise Rate} & \textbf{Baseline PR-AUC} & \textbf{LiLAW PR-AUC} & \textbf{$\Delta$ PR-AUC} & \textbf{Baseline Rec@PPV80} & \textbf{LiLAW Rec@PPV80} \\
+        \midrule
+        10\% & 0.692 $\pm$0.019 & 0.702 $\pm$0.017 & $+$1.3\% & 0.276 $\pm$0.090 & 0.296 $\pm$0.101 \\
+        20\% & 0.691 $\pm$0.016 & 0.699 $\pm$0.018 & $+$1.2\% & 0.295 $\pm$0.074 & 0.294 $\pm$0.093 \\
+        30\% & 0.686 $\pm$0.014 & 0.700 $\pm$0.019 & $+$2.1\% & 0.295 $\pm$0.052 & 0.297 $\pm$0.088 \\
+        40\% & 0.679 $\pm$0.015 & 0.699 $\pm$0.018 & $+$2.9\% & 0.290 $\pm$0.060 & 0.311 $\pm$0.081 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+At the Rec@PPV80 operating point, LiLAW recovered 2.1 additional recall percentage points at 40\% noise (0.311 vs.\ 0.290 baseline). On Breast Cancer, directional improvements of 2--3\% appeared, but one seed consistently collapsed the model, inflating variance and masking the signal. On Pima Indians (768 samples), gains were marginal at low noise and turned negative at 30--40\%; the meta-update batches are too small at this dataset size to reliably steer the meta-parameters.
+
+These gains fall well short of the LiLAW paper's headline results ($+$17.2\% Top-1 accuracy at 50\% symmetric noise on CIFAR-100-M~\cite{moturu_lilaw_2025}). Two structural differences explain why: asymmetric one-directional noise conflates hard-noisy with hard-clean samples, weakening the difficulty signal LiLAW exploits, and the Adult baseline degrades only modestly across noise rates (0.692 to 0.679 PR-AUC), limiting headroom. The 1--3\% range is the expected operating envelope for LiLAW in the MLMD setting.
+
+\paragraph{MedMNIST replication.}
+
+We replicated the BloodMNIST experiment (11,959 training samples, 8 classes, symmetric noise) with ResNet-18, ImageNet pretraining, and early stopping (patience=10) over 30 epochs. LiLAW did not consistently outperform the baseline: accuracy differences were within $\pm$0.5\% at all noise rates (Table~\ref{tab:medmnist_v1}). The 0\% baseline reached 96.4\%, confirming the setup is sound.
+
+\begin{table}[htbp]
+    \centering
+    \caption{BloodMNIST replication under symmetric noise, ResNet-18 with ImageNet pretraining. Mean Top-1 accuracy over 3 seeds.}
+    \label{tab:medmnist_v1}
+    \small
+    \begin{tabular}{lrrr}
+        \toprule
+        \textbf{Noise Rate} & \textbf{Baseline Accuracy} & \textbf{LiLAW Accuracy} & \textbf{$\Delta$} \\
+        \midrule
+        0\%  & 96.39\% & 96.74\% & $+$0.35\% \\
+        20\% & 94.47\% & 94.13\% & $-$0.35\% \\
+        40\% & 92.94\% & 92.78\% & $-$0.16\% \\
+        60\% & 90.15\% & 89.62\% & $-$0.53\% \\
+        80\% & 82.09\% & 82.59\% & $+$0.50\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Meta-parameter diagnostics identified the cause. $\alpha$ saturated near its maximum (${\approx}10$) within the first few epochs regardless of noise rate, exhausting the easy-sample suppression signal early. $\beta$ and $\delta$ did adapt monotonically with noise (increasing by 0.6 and 1.1 from 0\% to 80\%), confirming the weighting mechanism responds to corruption. The most natural explanation is epoch budget: patience=10 terminated training before the $\beta$ and $\delta$ dynamics could reshape the loss landscape. A follow-up sweep extends training to 100 epochs on BloodMNIST and DermaMNIST at 0\%, 30\%, and 50\% noise; results are pending.
+
+\subsection{Downstream MLMD integration}
+
+Both pipeline components have been implemented against the full MLMD architecture. The four-condition ablation across the 483,705-encounter cohort encountered configuration issues from late system access and is not complete at submission. The proxy validation establishes the expected operating range: 1.2--2.9\% PR-AUC improvement under tabular asymmetric noise, with gains scaling with noise rate and concentrated at the high-precision operating point. Whether that magnitude transfers to the multi-modal transformer, and whether imputation and LiLAW provide complementary or overlapping recall gains, are the questions the pending ablation will answer.
+
+String matching requires negligible overhead (0.55 ms per encounter, 6.16 ms initialization). GraphRAG incurs higher cost (175.54 ms per encounter, 17.75 s initialization) but this latency is inconsequential for offline imputation.

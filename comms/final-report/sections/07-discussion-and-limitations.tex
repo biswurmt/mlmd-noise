@@ -1,0 +1,14 @@
+\section{Discussion and Limitations}
+
+% [PARTIAL: The narrative below covers the imputation track, where results are available.
+%  The LiLAW and Combined sections are placeholders pending Tyler's ablation results.]
+
+The GraphRAG pipeline identified 11,110 candidate false negatives the production regex system missed. The divergence between retrieval strategies is instructive: GraphRAG achieved 0.944 precision on Testicular Ultrasounds where string matching collapsed to 0.048, because biomedical embeddings resolve the anatomical term overlap that overwhelms substring matching. The inverse held for Appendix Ultrasounds, where documentation is sufficiently standardized that lexical matching outperforms semantic generalization (0.793 vs.\ 0.198 recall). A pathway-conditional strategy would combine the strengths of both.
+
+The proxy validation establishes that LiLAW improves ranking quality by 1.2--2.9\% PR-AUC under the target noise conditions, with gains scaling with noise rate. The pending ablation will determine whether imputation and LiLAW provide complementary recall gains on the full MLMD cohort. Expected magnitude is in the 1--3\% range demonstrated in proxy validation, not the 17\% reported on CIFAR; the MLMD setting offers less headroom because the baseline degrades only modestly and noise is likely below 40\%.
+
+The MLMD is decision support, not automation. Clinicians retain final authority to override any prediction. A missed prediction does not mean a missed test; the physician can still order it during assessment. The cost of a miss is time (the patient returns to the serialized workflow), not patient safety. Precision failures carry a different risk: unnecessary authorizations burden ancillary departments and erode clinician confidence over time. The evaluation framework reflects this asymmetry, treating recall as the efficiency metric and precision as the safety constraint.
+
+\subsection{Limitations}
+
+The Knowledge Graph is a point-in-time artifact with no automated mechanism for incorporating guideline updates; a graph built on 2025 evidence may diverge from practice without continuous maintenance. Sensitivity to alternative biomedical encoders was not characterized. GraphRAG cannot recover cases where patients were transferred before any diagnosis was assigned or where the SickKids assessment differed from the external facility's. LiLAW's effectiveness on real clinical asymmetric noise, as opposed to synthetic benchmarks, is evaluated here for the first time without external institutional validation. Neural network opacity imposes a practical ceiling on clinician adoption: the model cannot explain its predictions in clinical terms, limiting the depth of oversight it can support.
