@@ -48,21 +48,21 @@ GraphRAG Semantic Retrieval was more consistent: 0.944 precision on Testicular U
 
 We validated LiLAW on three tabular binary classification benchmarks under synthetically injected asymmetric positive-to-negative noise, mirroring the MLMD structure. A 5-layer MLP was trained at four noise rates (10--40\%) with noise confined to train and validation splits; results are averaged over three seeds with a 55/15/30 split.
 
-Adult Income (48,842 samples, 14 features) most closely matches the MLMD problem: mixed continuous and categorical features with moderate class imbalance. LiLAW improved PR-AUC by 1.3--2.9 percentage points across all four noise rates, with gains increasing monotonically (Table~\ref{tab:poc_adult}).
+Adult Income (48,842 samples, 14 features) most closely matches the MLMD problem: mixed continuous and categorical features with moderate class imbalance. LiLAW improved PR-AUC by 1.2--2.9 percentage points across all four noise rates, with gains generally scaling with noise rate (Table~\ref{tab:poc_adult}).
 
 \begin{table}[htbp]
     \centering
     \caption{LiLAW proxy validation on Adult Income with asymmetric positive-to-negative noise. PR-AUC and Recall at PPV $\geq$ 0.80 (Rec@PPV80), mean $\pm$ std over 3 seeds.}
     \label{tab:poc_adult}
     \small
-    \begin{tabular}{lrrrr}
+    \begin{tabular}{lrrrrr}
         \toprule
-        \textbf{Noise Rate} & \textbf{Baseline PR-AUC} & \textbf{LiLAW PR-AUC} & \textbf{$\Delta$ PR-AUC} & \textbf{LiLAW Rec@PPV80} \\
+        \textbf{Noise Rate} & \textbf{Baseline PR-AUC} & \textbf{LiLAW PR-AUC} & \textbf{$\Delta$ PR-AUC} & \textbf{Baseline Rec@PPV80} & \textbf{LiLAW Rec@PPV80} \\
         \midrule
-        10\% & 0.692 $\pm$0.019 & 0.702 $\pm$0.017 & $+$1.3\% & 0.296 $\pm$0.101 \\
-        20\% & 0.691 $\pm$0.016 & 0.699 $\pm$0.018 & $+$1.2\% & 0.294 $\pm$0.093 \\
-        30\% & 0.686 $\pm$0.014 & 0.700 $\pm$0.019 & $+$2.1\% & 0.297 $\pm$0.088 \\
-        40\% & 0.679 $\pm$0.015 & 0.699 $\pm$0.018 & $+$2.9\% & 0.311 $\pm$0.081 \\
+        10\% & 0.692 $\pm$0.019 & 0.702 $\pm$0.017 & $+$1.3\% & 0.276 $\pm$0.090 & 0.296 $\pm$0.101 \\
+        20\% & 0.691 $\pm$0.016 & 0.699 $\pm$0.018 & $+$1.2\% & 0.295 $\pm$0.074 & 0.294 $\pm$0.093 \\
+        30\% & 0.686 $\pm$0.014 & 0.700 $\pm$0.019 & $+$2.1\% & 0.295 $\pm$0.052 & 0.297 $\pm$0.088 \\
+        40\% & 0.679 $\pm$0.015 & 0.699 $\pm$0.018 & $+$2.9\% & 0.290 $\pm$0.060 & 0.311 $\pm$0.081 \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -127,6 +127,6 @@ Meta-parameter diagnostics identified the cause. $\alpha$ saturated near its max
 
 \subsection{Downstream MLMD integration}
 
-Both pipeline components have been implemented against the full MLMD architecture. The four-condition ablation across the 483,705-encounter cohort encountered configuration issues from late system access and is not complete at submission. The proxy validation establishes the expected operating range: 1.3--2.9\% PR-AUC improvement under tabular asymmetric noise, with gains scaling with noise rate and concentrated at the high-precision operating point. Whether that magnitude transfers to the multi-modal transformer, and whether imputation and LiLAW provide complementary or overlapping recall gains, are the questions the pending ablation will answer.
+Both pipeline components have been implemented against the full MLMD architecture. The four-condition ablation across the 483,705-encounter cohort encountered configuration issues from late system access and is not complete at submission. The proxy validation establishes the expected operating range: 1.2--2.9\% PR-AUC improvement under tabular asymmetric noise, with gains scaling with noise rate and concentrated at the high-precision operating point. Whether that magnitude transfers to the multi-modal transformer, and whether imputation and LiLAW provide complementary or overlapping recall gains, are the questions the pending ablation will answer.
 
 String matching requires negligible overhead (0.55 ms per encounter, 6.16 ms initialization). GraphRAG incurs higher cost (175.54 ms per encounter, 17.75 s initialization) but this latency is inconsequential for offline imputation.
