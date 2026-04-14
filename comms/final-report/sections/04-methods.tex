@@ -1,0 +1,42 @@
+\section{Methods}
+
+\subsection{Label imputation via Knowledge Graph}
+
+The label imputation pipeline constructs an evidence-grounded Knowledge Graph (KG) mapping ICD-10 diagnosis codes to clinically indicated diagnostic tests. The KG serves as audited clinical ground truth: when a patient's post-assessment diagnosis maps to a test but the encounter lacks a positive label for that test, the label is imputed positive. Imputation runs offline over the training set only. No diagnosis codes are available at inference time.
+
+\paragraph{Knowledge Graph construction.}
+The graph is built in four stages.
+
+\textit{Stage 1: Baseline rule generation.} An LLM generates triage rules mapping clinical observations to conditions and their required tests. To reduce hallucination, the LLM is grounded via RAG over the EPFL clinical guidelines dataset, with retrieved guideline texts providing in-context learning.
+
+\textit{Stage 2: Ontology standardization.} All entities are mapped to recognized medical ontologies through external APIs. Symptom nodes receive Human Phenotype Ontology (HP) and MONDO terms (EMBL-EBI OLS4 API); condition nodes are annotated with WHO ICD-10 codes (UMLS REST API) and ICD-10-CA codes (Canada Health Infoway FHIR); diagnostic test nodes receive LOINC panel codes.
+
+\textit{Stage 3: Evidence enrichment.} Edges are weighted with quantitative literature evidence. Peer-reviewed article and patent co-occurrence counts (Europe PMC API) attach to symptom-to-condition and condition-to-test edges; clinical trial counts (ClinicalTrials.gov) attach to treatment pathways. This allows the system to distinguish well-supported clinical associations from marginal correlations.
+
+\textit{Stage 4: Ontological expansion.} The graph is extended by integrating ClinGraph~\cite{johnson_clinvec_2024}, a 153K-node, ${\sim}$3M-edge clinical knowledge graph spanning SNOMED CT, ICD-10-CM, LOINC, RxNorm, and related vocabularies. ClinGraph back-fills missing cross-vocabulary codes and adds up to 500 first-degree neighbor nodes per existing node.
+
+\paragraph{Multi-agent audit.}
+Before imputation, every diagnosis-to-test pathway is validated by a four-persona multi-agent audit pipeline. The unit of review is a clinical triad: a (finding $\to$ condition $\to$ test) path extracted by traversing \texttt{INDICATES\_CONDITION} followed by \texttt{REQUIRES\_TEST} edges. Triads are deduplicated and sorted by clinical acuity (HIGH, MODERATE, STANDARD) to prioritize time-sensitive pathways.
+
+Three independent personas evaluate each triad: a Protocol \& Triage Enforcer with RAG access over clinical guidelines, a Rapid Diagnostics Researcher querying live literature databases (Semantic Scholar, Europe PMC), and an ED Attending evaluating clinical flow pragmatics and never-event mitigation. A fourth persona, the ED Medical Director, synthesizes these assessments into a verdict (\textit{Verified}, \textit{Flagged for Review}, or \textit{Rejected}) and a continuous confidence score in $[0, 1]$. Three hard-flag conditions bypass scoring and unconditionally produce a \textit{Flagged} verdict: a genuine clinical error in the pathway, a Choosing Wisely flag, or zero guideline and literature support. Audit outcomes are written back as edge attributes and inform retrieval during imputation.
+
+\paragraph{Imputation strategies.}
+We evaluate two retrieval strategies. \textit{KG String Matching} uses bidirectional substring matching to map patient diagnosis strings to KG nodes, then traverses 1-hop (\texttt{REQUIRES\_TEST} or \texttt{DIRECTLY\_INDICATES\_TEST}) and 2-hop (\texttt{INDICATES\_CONDITION} $\to$ \texttt{REQUIRES\_TEST}) edges to identify indicated tests. A minimum-node threshold $\tau$ requires at least $\tau$ independently matched nodes to nominate a test before imputation, reducing false positives from broad symptom matches. \textit{GraphRAG Semantic Retrieval} embeds KG nodes and patient diagnoses using the MedEmbed biomedical language model, querying a local ChromaDB vector store to capture cases without lexical overlap. A sliding-window negation filter discards matches where the clinical concept is negated in the source text (e.g., ``no chest pain'' does not trigger ECG imputation). Indicated tests are ranked by aggregate cosine similarity across matched nodes and filtered by a threshold $\theta$.
+
+\subsection{Noise-aware training via LiLAW}
+
+% [MISSING: Tyler's section. Key content to cover:
+%   - LiLAW overview: meta-learning framework that learns three scalar parameters (alpha, beta, delta)
+%     to weight training samples by loss magnitude
+%   - Bilevel optimization: inner loop updates model parameters on the weighted training batch;
+%     outer loop updates alpha/beta/delta on held-out validation performance
+%   - How this handles residual noise after imputation: imputation corrects deterministic false
+%     negatives (clear diagnosis-test link); LiLAW down-weights probabilistic ones (ambiguous
+%     clinical indication, e.g. chest pain sometimes but not always warrants ECG)
+%   - Training schedule, convergence criteria, hyperparameter selection
+%   Citation: \cite{moturu_lilaw_2025}]
+\textbf{[TODO: Tyler to draft.]}
+
+\subsection{Combined approach}
+
+In the combined condition, LiLAW training is applied to the GraphRAG-imputed dataset. The two interventions target complementary failure modes. GraphRAG corrects the deterministic subset of false negatives, where a documented diagnosis clearly implies a test was needed. LiLAW handles the residual probabilistic uncertainty, down-weighting samples whose loss magnitude during training suggests misclassification. Imputation reduces the noise rate; LiLAW adapts to whatever noise remains.

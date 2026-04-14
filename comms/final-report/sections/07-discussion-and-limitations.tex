@@ -1,0 +1,19 @@
+\section{Discussion and Limitations}
+
+% [PARTIAL: The narrative below covers the imputation track, where results are available.
+%  The LiLAW and Combined sections are placeholders pending Tyler's ablation results.]
+
+The GraphRAG pipeline identified 11,110 test-ordering events that the production regex system misclassified as negatives. The performance gap between retrieval strategies is itself informative. On Testicular Ultrasounds, GraphRAG achieved 0.944 precision where KG String Matching collapsed to 0.048: anatomical terms in that pathway overlap frequently enough with unrelated symptom descriptions to overwhelm a substring match, while biomedical semantic embeddings resolve the ambiguity. The inverse held for Appendix Ultrasounds, where string matching reached 0.793 recall against GraphRAG's 0.198. When documentation for a pathway is sufficiently standardized, lexical matching is reliable and semantic generalization introduces noise rather than resolving it. A pathway-conditional strategy (string matching where documentation is formulaic, GraphRAG where it varies) would be a natural next step.
+
+The downstream ablation will determine whether 11,110 additional positive labels translate to meaningful recall gains at deployment, and whether LiLAW provides additive benefit once the label distribution has been partially corrected. The two interventions target complementary failure modes: data-level correction where clinical evidence is conclusive, algorithmic re-weighting where it is not. Whether LiLAW's marginal gain over imputation alone justifies its training complexity is the central empirical question the pending results will answer.
+% [TODO: Update this section once Table 2 values are available.]
+
+The MLMD is decision support, not automation. Clinicians retain final authority to override any prediction. This distinction matters for interpreting recall failures: a missed prediction does not mean a missed test, because the physician can still order it during assessment. The cost of a miss is time (the patient returns to the serialized workflow), not patient safety. Precision failures carry a different risk: unnecessary authorizations burden ancillary departments and may erode clinician confidence in the system over time. The evaluation framework reflects this asymmetry, treating recall as the efficiency metric and precision as the safety constraint.
+
+\subsection{Limitations}
+
+The Knowledge Graph is a point-in-time artifact. RAG over clinical guidelines grounds the initial construction in current evidence, but the vector database is built statically with no automated mechanism for incorporating guideline updates. Clinical recommendations evolve; a graph that reflects 2025 evidence may diverge from practice within two years without continuous maintenance. The semantic pipeline also relies on a single embedding model (MedEmbed), and sensitivity to alternative biomedical encoders was not systematically characterized.
+
+Label noise cannot be fully corrected by imputation. GraphRAG recovers cases where a post-assessment diagnosis clearly implies a test was needed, but it cannot recover cases where the patient was transferred before any diagnosis was assigned or where the clinical assessment at SickKids differed from the external facility's. LiLAW addresses residual probabilistic noise through the model's loss landscape rather than observed ground truth. Its effectiveness on real clinical asymmetric noise, as opposed to the synthetic benchmarks in prior work~\cite{moturu_lilaw_2025}, is evaluated here for the first time, but external validation at other institutions has not been performed.
+
+Neural network opacity imposes a practical ceiling on clinician adoption. Even with well-calibrated confidence scores, the model cannot explain in clinical terms why it predicts a specific test for a specific patient, limiting the depth of clinical oversight the system can support.

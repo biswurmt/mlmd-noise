@@ -1,0 +1,12 @@
+\section{Evaluation}
+
+The cohort is temporally partitioned to simulate prospective deployment. Encounters from [TODO: start year] to [TODO: end year] form the training and validation set ($X$\%); encounters from [TODO: year] to January 2026 are held out for testing ($Y$\%).
+% [NOTE: Temporal split years not yet finalized. Alice to confirm from the experimental setup.]
+
+We compare four training conditions: (1) \textit{Production Baseline}, a standard classifier trained on the original regex-imputed labels; (2) \textit{GraphRAG Imputation Only}, retrained on the KG-imputed dataset with standard training; (3) \textit{LiLAW Only}, trained on the original regex labels with LiLAW-weighted training; and (4) \textit{Combined}, LiLAW-weighted training on the KG-imputed dataset.
+
+Recall (true positive rate) is the primary metric. It measures the fraction of needed tests the model authorizes at triage, directly quantifying efficiency: each authorized test completes while the patient waits for assessment, while each miss returns the patient to the serialized queue. Precision (positive predictive value) is the safety constraint, ensuring the system does not burden ancillary departments with unwarranted test authorizations. We report precision-recall (PR) curves at multiple operating thresholds rather than single-threshold summaries, because clinical deployment requires understanding the full tradeoff. AUROC captures overall discriminative ability under severe class imbalance. Expected Calibration Error (ECE) measures whether model confidence scores can be interpreted as meaningful probabilities, which determines how much weight clinicians can place on the system's predictions.
+% [NOTE: ECE figures are required per the project specification and are not yet included.
+%  Add a calibration curve figure here once ablation runs complete.]
+
+The imputation pipeline is evaluated separately from the downstream model. The production regex system serves as a high-precision, low-recall baseline. Novel positive imputations absent from the regex baseline are classified as ``discoveries'': potential clinical false negatives the regex missed. To validate these, a clinical domain expert performed retrospective chart review on a random sample of $n = \text{[TODO]}$ newly imputed labels, confirming their clinical validity.

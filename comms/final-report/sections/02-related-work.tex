@@ -1,0 +1,16 @@
+\section{Related Work}
+
+\paragraph{Label imputation in EHRs.}
+Missing labels in clinical datasets are rarely missing at random; their absence reflects institutional silos~\cite{ross_accuracy_2020} and clinical workflow patterns~\cite{li_imputation_2021}. Most imputation work targets missing continuous \textit{features} (vital signs, laboratory values)~\cite{psychogyios_missing_2023}, but imputing missing \textit{labels} is a distinct problem. The SickKids noise structure fits the Positive-Unlabeled (PU) learning paradigm~\cite{bekker_learning_2020}: positive labels are trustworthy, while the unlabeled class conflates true negatives with unobserved external events. Prior PU approaches treat the unlabeled class as a statistical quantity to estimate, whether through Bayesian mixture models~\cite{wang_bayesian_2023} or label-recovery frameworks for clinical codes~\cite{kumar_detecting_2025}. Our approach resolves the ambiguity directly: we query a validated Knowledge Graph against each patient's post-assessment diagnosis before training begins, converting a probabilistic inference problem into a clinical evidence lookup where the graph permits it.
+
+\paragraph{Knowledge graphs and LLMs in clinical decision support.}
+LLMs show strong capacity for medical knowledge imputation~\cite{yao_llm_imputation_2025} and clinical entity recognition from unstructured notes~\cite{islam_llm-based_2025}, but standalone LLM outputs lack auditability and hallucinate in high-stakes settings. Retrieval-augmented generation (RAG) over clinical guidelines improves extraction accuracy by grounding outputs in validated sources~\cite{li_automated_2024, nanua_retrieval-augmented_2025}. GraphRAG architectures~\cite{edge_local_2024, peng_graphrag_survey_2024} extend this by combining structured Knowledge Graph reasoning with contextual retrieval, enabling semantically coherent inference across interconnected clinical concepts. We adopt a GraphRAG architecture but depart from existing work in three ways: the Knowledge Graph is constructed dynamically from live clinical guidelines, enriched with ontology-standardized codes and quantitative literature evidence, and every diagnosis-to-test pathway is validated through a multi-agent clinical audit before use.
+
+\paragraph{Meta-learning for noisy labels.}
+% [MISSING: Tyler's section. Scope per contributions table (conf-paper.tex):
+%   1. Broad context: learning with noisy labels (noise-robust losses, MentorNet, Co-teaching)
+%   2. Meta-learning / sample-weighting approaches (L2RW, MWNet, MAML-adjacent methods)
+%   3. LiLAW specifically: how it differs from prior work, what the three scalar parameters
+%      (alpha, beta, delta) buy over prior reweighting methods
+%   Citation: \cite{moturu_lilaw_2025}]
+\textbf{[TODO: Tyler to draft.]}
