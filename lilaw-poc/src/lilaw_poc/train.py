@@ -31,7 +31,9 @@ def train_baseline(
     lr: float = 1e-4,
     momentum: float = 0.9,
     weight_decay: float = 1e-6,
-    hidden_dim: int = 128,
+    hidden_dim: int = 128,,
+    device: torch.device | None = None,,
+    device: torch.device | None = None,
 ) -> TrainResult:
     """Train an MLMDNet with vanilla BCE loss.
 
@@ -51,11 +53,19 @@ def train_baseline(
     Returns:
         TrainResult with trained model and loss history.
     """
-    model = MLMDNet(input_dim=input_dim, hidden_dim=hidden_dim)
+    device = device if device is not None else torch.device("cpu")
+    device = device if device is not None else torch.device("cpu")
+    model = MLMDNet(input_dim=input_dim, hidden_dim=hidden_dim).to(device).to(device)
     optimizer = torch.optim.SGD(
         model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
     )
     criterion = nn.BCELoss()
+
+    # Move data to device once
+    x_train = x_train.to(device)
+    y_train = y_train.to(device)
+    x_val = x_val.to(device)
+    y_val = y_val.to(device)
 
     train_loader = DataLoader(
         TensorDataset(x_train, y_train.float()), batch_size=batch_size, shuffle=True
@@ -104,7 +114,8 @@ def train_lilaw(
     meta_wd: float = 0.0001,
     alpha_init: float = 10.0,
     beta_init: float = 2.0,
-    delta_init: float = 6.0,
+    delta_init: float = 6.0,,
+    device: torch.device | None = None,
 ) -> TrainResult:
     """Train an MLMDNet with LiLAW-weighted BCE loss.
 
@@ -134,13 +145,27 @@ def train_lilaw(
     Returns:
         TrainResult with trained model, loss history, and meta-parameter trajectory.
     """
-    model = MLMDNet(input_dim=input_dim, hidden_dim=hidden_dim)
+    device = device if device is not None else torch.device("cpu")
+    device = device if device is not None else torch.device("cpu")
+    model = MLMDNet(input_dim=input_dim, hidden_dim=hidden_dim).to(device).to(device)
     optimizer = torch.optim.SGD(
         model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
     )
     weighter = LiLAWWeighter(
         alpha_init=alpha_init, beta_init=beta_init, delta_init=delta_init
     )
+
+    # Move data to device once
+    x_train = x_train.to(device)
+    y_train = y_train.to(device)
+    x_val = x_val.to(device)
+    y_val = y_val.to(device)
+
+    # Move data to device once
+    x_train = x_train.to(device)
+    y_train = y_train.to(device)
+    x_val = x_val.to(device)
+    y_val = y_val.to(device)
 
     train_loader = DataLoader(
         TensorDataset(x_train, y_train.float()), batch_size=batch_size, shuffle=True
