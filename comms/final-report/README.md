@@ -1,6 +1,6 @@
 # Final Report
 
-Final report source for CSC2541H:
+Final report source for LMP2392H:
 `Reading Between the Lines: LLM-Based Label Imputation and Meta-Learning for Noisy Labels in Emergency Department Triage`
 
 This repo is for writing and assembling the paper, not for running the ML pipeline itself.

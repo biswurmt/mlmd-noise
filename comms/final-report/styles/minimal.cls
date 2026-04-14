@@ -1,6 +1,6 @@
 %% minimal.cls
 %% Minimalist Academic Template for Milestone Two
-%% CSC2541H · AI for Drug Discovery · University of Toronto
+%% LMP2392H · Healthcare and Medicine Basics for AI Experts · University of Toronto
 %%
 %% Based on the milestone_one_minimal design.
 %% Provides: 11pt Times New Roman, 2cm margins, navy accents, small-caps headings.
@@ -98,7 +98,7 @@
     \vspace{1pt}%
     \noindent{\small\textit{%
       Department of Computer Science, University of Toronto
-      \enspace$\cdot$\enspace CSC2541H
+      \enspace$\cdot$\enspace LMP2392H
       \enspace$\cdot$\enspace April~2026}}\par
     \vspace{8pt}%
     {\small\noindent\textbf{Abstract.}\enspace\@abstracttext}%

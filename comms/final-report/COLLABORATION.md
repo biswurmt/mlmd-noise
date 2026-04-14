@@ -3,7 +3,7 @@
 ## Project
 
 **Reading Between the Lines: LLM-Based Label Imputation and Meta-Learning for Noisy Labels in Emergency Department Triage**
-CSC2541H, University of Toronto. Deadline: April 14, 2026.
+LMP2392H, University of Toronto. Deadline: April 14, 2026.
 
 **Research question:** Can label imputation via LLM-guided diagnosis-to-test mapping, combined with LiLAW meta-learning, improve test-prediction recall without sacrificing precision in a clinical MLMD system where negative labels are systematically unreliable?
 
