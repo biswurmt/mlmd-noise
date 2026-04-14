@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional free-form note stored beside the results.",
     )
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cuda", "cpu"],
+        default="auto",
+        help="Device to run on: auto (cuda if available), cuda, or cpu.",
+    )
     return parser.parse_args()
 
 
@@ -59,18 +65,53 @@ def write_suite_config(args: argparse.Namespace) -> Path:
 def main() -> None:
     args = parse_args()
     config_path = write_suite_config(args)
+
+    # Prepare logging: tee stdout/stderr to a logfile under the output dir
+    log_path = Path(args.output_dir) / "run.log"
+
+    class _Tee:
+        def __init__(self, *files):
+            self.files = files
+
+        def write(self, data):
+            for f in self.files:
+                f.write(data)
+                f.flush()
+
+        def flush(self):
+            for f in self.files:
+                f.flush()
+
+    logfile = open(log_path, "a")
+    sys.stdout = _Tee(sys.stdout, logfile)
+    sys.stderr = _Tee(sys.stderr, logfile)
+
     print(f"Wrote suite config to {config_path}")
     print(
         "Running MedMNIST sweep: "
         f"datasets={args.datasets} noise_rates={args.noise_rates} "
         f"seeds={args.seeds} epochs={args.epochs}"
     )
+
+    # Resolve device
+    import torch as _torch
+
+    if args.device == "auto":
+        dev = _torch.device("cuda" if _torch.cuda.is_available() else "cpu")
+    elif args.device == "cuda":
+        dev = _torch.device("cuda")
+    else:
+        dev = _torch.device("cpu")
+
+    print(f"Using device: {dev}")
+
     run_sweep(
         datasets=args.datasets,
         noise_rates=args.noise_rates,
         seeds=args.seeds,
         epochs=args.epochs,
         output_dir=args.output_dir,
+        device=dev,
     )
 
 
