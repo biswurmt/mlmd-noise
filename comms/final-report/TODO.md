@@ -21,8 +21,9 @@
 
 - [x] Related Work: Meta-Learning for Noisy Labels (`02-related-work.tex`)
 - [x] Methods: Robust Training via LiLAW (`04-methods.tex`)
-- [ ] Results: LiLAW-only ablation narrative + numbers (Table 2)
-- [ ] Results: Combined condition narrative + numbers (Table 2, shared with Alice)
+- [x] Results: LiLAW proxy validation subsection (tabular PoC + MedMNIST replication, real numbers)
+- [~] Results: LiLAW-only ablation narrative (drafted with PENDING markers; needs MLMD numbers for Table 2)
+- [~] Results: Combined condition narrative (drafted with PENDING markers; needs MLMD numbers for Table 2)
 
 ---
 
