@@ -150,7 +150,7 @@ def train_lilaw(
     )
     weighter = LiLAWWeighter(
         alpha_init=alpha_init, beta_init=beta_init, delta_init=delta_init
-    )
+    ).to(device)
 
     # Move data to device once
     x_train = x_train.to(device)

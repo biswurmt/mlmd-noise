@@ -122,3 +122,11 @@ class TestLiLAWWeighter:
 
         weighter.meta_step(lr=0.005, wd=0.0001)
         assert weighter.alpha.item() != old_alpha
+
+    def test_to_moves_meta_params_to_target_device(self) -> None:
+        """All meta-parameters should follow the requested device."""
+        weighter = LiLAWWeighter().to("cpu")
+
+        assert weighter.alpha.device.type == "cpu"
+        assert weighter.beta.device.type == "cpu"
+        assert weighter.delta.device.type == "cpu"

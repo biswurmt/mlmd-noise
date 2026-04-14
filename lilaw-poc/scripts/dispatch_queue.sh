@@ -66,6 +66,7 @@ declare -a GPUS=()
 declare -a GPU_PIDS=()
 declare -a JOBS=()
 declare -a ALL_PIDS=()
+LAST_LAUNCHED_PID=""
 
 while IFS= read -r line; do
   [[ "${line}" =~ ^[[:space:]]*$ ]] && continue
@@ -157,7 +158,7 @@ launch_job() {
   local pid=$!
   printf 'pid=%s\n' "${pid}" >>"${status_file}"
   echo "  pid=${pid} log=${log_file}" >&2
-  printf '%s' "${pid}"
+  LAST_LAUNCHED_PID="${pid}"
 }
 
 job_index=0
@@ -172,8 +173,8 @@ for cmd in "${JOBS[@]}"; do
     while (( $(running_jobs) >= MAX_PARALLEL )); do
       sleep 1
     done
-    pid=$(launch_job "${cmd}" "cpu" "${log_file}" "${status_file}" "${cmd_file}")
-    ALL_PIDS+=("${pid}")
+    launch_job "${cmd}" "cpu" "${log_file}" "${status_file}" "${cmd_file}"
+    ALL_PIDS+=("${LAST_LAUNCHED_PID}")
     continue
   fi
 
@@ -183,14 +184,14 @@ for cmd in "${JOBS[@]}"; do
     for ((gpu_index = 0; gpu_index < ${#GPUS[@]}; gpu_index++)); do
       gpu="${GPUS[$gpu_index]}"
       if [[ -z "${GPU_PIDS[$gpu_index]:-}" ]]; then
-        pid=$(launch_job \
+        launch_job \
           "CUDA_VISIBLE_DEVICES=${gpu} ${cmd}" \
           "gpu:${gpu}" \
           "${log_file}" \
           "${status_file}" \
-          "${cmd_file}")
-        GPU_PIDS[$gpu_index]="${pid}"
-        ALL_PIDS+=("${pid}")
+          "${cmd_file}"
+        GPU_PIDS[$gpu_index]="${LAST_LAUNCHED_PID}"
+        ALL_PIDS+=("${LAST_LAUNCHED_PID}")
         launched=1
         break
       fi

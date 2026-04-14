@@ -65,6 +65,14 @@ class LiLAWWeighter:
         """Compute weights using current meta-parameters."""
         return compute_lilaw_weights(s_label, s_max, self.alpha, self.beta, self.delta)
 
+    def to(self, device: torch.device | str) -> "LiLAWWeighter":
+        """Move all meta-parameters onto a target device."""
+        dev = torch.device(device)
+        self.alpha = self.alpha.detach().to(dev).requires_grad_(self.alpha.requires_grad)
+        self.beta = self.beta.detach().to(dev).requires_grad_(self.beta.requires_grad)
+        self.delta = self.delta.detach().to(dev).requires_grad_(self.delta.requires_grad)
+        return self
+
     def meta_step(self, lr: float = 0.005, wd: float = 0.0001) -> None:
         """Manual SGD update on meta-parameters with weight decay."""
         with torch.no_grad():
