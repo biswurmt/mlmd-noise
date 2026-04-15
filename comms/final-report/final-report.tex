@@ -7,6 +7,9 @@
 \documentclass{styles/minimal}
 
 \usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
 %% Set PDF metadata
 \hypersetup{
@@ -47,5 +50,10 @@
 %% ── References ────────────────────────────────────────────────────────────────
 \clearpage
 \bibliography{references}
+
+%% ── Appendices ────────────────────────────────────────────────────────────────
+\clearpage
+\appendix
+\input{sections/09-appendices}
 
 \end{document}

@@ -1,22 +1,13 @@
 \section{Results}
 \label{sec:results}
 
-\subsection{Knowledge Graph integrity}
-% [MISSING: KG clinical validation statistics. Alice to provide:
-%   - Total node count and edge count of the final graph
-%   - Breakdown of audit verdicts: n Verified / Flagged for Review / Rejected
-%   - Mean confidence score across verified pathways
-%   - Any statistics on ontology coverage (fraction of conditions with ICD-10/SNOMED CT codes)
-%  This section justifies the downstream imputation by demonstrating the graph's clinical rigor.]
-\textbf{[TODO: Alice to draft once KG validation statistics are compiled.]}
-
 \subsection{Label imputation performance}
 
 Table~\ref{tab:imputation_results} compares the two imputation strategies against the regex baseline across all four diagnostic pathways.
 
 KG String Matching showed extreme variance. It performed well on Appendix Ultrasounds ($F_1 = 0.801$) where documentation is standardized, but failed on Arm X-Rays (Recall: 0.031) and Testicular Ultrasounds (Precision: 0.048, 20,035 discoveries) where anatomical terms overlap with unrelated symptom descriptions.
 
-GraphRAG Semantic Retrieval was more consistent: 0.944 precision on Testicular Ultrasounds and 0.733 recall on Arm X-Rays, recovering presentations that lexical matching missed. The exception was Appendix Ultrasounds (recall 0.198), where the embedding space flattens distinctions that substring matching preserves in this narrowly documented pathway. GraphRAG identified 11,110 total discoveries; chart review of $n = \text{[TODO]}$ sampled cases confirmed [TODO]\% as genuinely indicated tests.
+GraphRAG Semantic Retrieval was more consistent: 0.944 precision on Testicular Ultrasounds and 0.733 recall on Arm X-Rays, recovering presentations that lexical matching missed. The exception was Appendix Ultrasounds (recall 0.198), where the embedding space flattens distinctions that substring matching preserves in this narrowly documented pathway. GraphRAG identified 11,110 total discoveries.
 
 \begin{table}[htbp]
     \centering
@@ -99,4 +90,4 @@ Meta-parameter diagnostics identified the cause. $\alpha$ saturated near its max
 
 Both pipeline components have been implemented against the full MLMD architecture. The four-condition ablation across the 483,705-encounter cohort encountered configuration issues from late system access and is not complete at submission. The proxy validation establishes the expected operating range: 1.2--2.9\% PR-AUC improvement under tabular asymmetric noise, with gains scaling with noise rate and concentrated at the high-precision operating point. Whether that magnitude transfers to the multi-modal transformer, and whether imputation and LiLAW provide complementary or overlapping recall gains, are the questions the pending ablation will answer.
 
-String matching requires negligible overhead (0.55 ms per encounter, 6.16 ms initialization). GraphRAG incurs higher cost (175.54 ms per encounter, 17.75 s initialization) but this latency is inconsequential for offline imputation.
+String matching requires negligible overhead (0.55 ms per encounter, 6.16 ms initialization). GraphRAG incurs higher cost (175.54 ms per encounter, 17.75 s initialization) but this latency is inconsequential for offline imputation. A phase-level breakdown separating entity matching from graph traversal is provided in Appendix~\ref{app:latency_benchmarks}.

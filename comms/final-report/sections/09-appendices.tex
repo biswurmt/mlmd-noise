@@ -1,0 +1,451 @@
+%% 09-appendices.tex
+
+\titleformat{\section}
+  {\normalfont\normalsize\bfseries\scshape\color{navy}}
+  {}{0em}{\Needspace*{4\baselineskip}Appendix~\thesection.\enspace}
+  [\vspace{1.5pt}{\color{navy}\titlerule[0.4pt]}]
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Contributions}
+\label{app:contributions}
+
+A breakdown of team contributions, encompassing both implementation and manuscript authorship, is provided in Table~\ref{tab:contributions}. At the request of collaborators at SickKids, the project's source code is hosted privately at \url{https://github.com/biswurmt/mlmd-noise/}. We plan to grant the instruction team access upon receipt of their GitHub handles.
+
+
+\begin{table}[ht]
+\centering
+\caption{Detailed breakdown of teammate contributions to this report and underlying investigation.}
+\label{tab:contributions}
+\small
+\begin{tabularx}{\textwidth}{@{} l X @{}}
+\toprule
+\textbf{Section} & \textbf{Contributors} \\
+\midrule
+Introduction          & Tyler: narrative structure and clinical framing \newline
+                        Alice: technical enrichment and editing \\
+\addlinespace
+Related work          & Tyler: literature review and source curation across both tracks; synthesis and final write-up for noise-resistant training track \newline
+                        Alice: literature review, source discovery, synthesis, and final write-up for label imputation track \\
+\addlinespace
+Data \& setting       & Alice: cohort selection, exclusions, and feature space description \\
+\addlinespace
+Methods               & \\
+\addlinespace
+\hspace{1em}Label imputation      & Alice: knowledge graph construction, multi-agent audit pipeline, and imputation strategies \newline
+                                    Tyler: ideation and design (RAG strategy over EPFL dataset, bidirectional KG prediction, etc.) \\
+\addlinespace
+\hspace{1em}Noise-resistant training & Tyler: LiLAW implementation; proxy experimental design and validation; ablation analysis \\
+\addlinespace
+\hspace{1em}Diagnotix             & Alice: knowledge graph visualization, Navigate Mode, and dynamic pathway generation \newline
+                                    Tyler: Analyze Mode chatbot, grounded via RAG over embedded clinical chunks \\
+\addlinespace
+Results               & \\
+\addlinespace
+\hspace{1em}KG validation \& discoveries & Alice: KG clinical validation and discovery of clinical false negatives \\
+\addlinespace
+\hspace{1em}MLMD performance      & Alice: impact of label imputation \newline
+                                    Tyler: proxy validation and combined efficacy \\
+\addlinespace
+\midrule
+Discussion            & Alice: primary synthesis and label imputation interpretation \newline
+                        Tyler: noise-resistant training discussion and limitations \\
+\addlinespace
+Future work           & Alice \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\newpage
+\section{Ontology Enrichment via External APIs}
+\label{app:api_integration}
+
+To ensure interoperability and standardize clinical entities, the Knowledge
+Graph build pipeline queries eight external services to attach standard medical
+codes and evidence metadata to each extracted record.
+Table~\ref{tab:api_breakdown} outlines this sequential enrichment process; step
+numbers correspond to the nine-step build pipeline described in the Methods
+section.
+
+\begin{table}[htbp]
+    \centering
+    \caption{API integration steps, targeted ontologies, and resulting dataset
+    schema modifications.}
+    \label{tab:api_breakdown}
+    \small
+    \resizebox{\linewidth}{!}{%
+    \begin{tabular}{c p{0.26\linewidth} p{0.14\linewidth} p{0.20\linewidth} p{0.26\linewidth}}
+        \toprule
+        \textbf{Step} & \textbf{API (Target Ontology)} & \textbf{Credential} &
+        \textbf{Enriched Entity} & \textbf{Column(s) Added} \\
+        \midrule
+        2 & \href{https://www.ebi.ac.uk/ols4}{EMBL-EBI OLS4} (HP / MONDO / EFO)
+          & None
+          & \texttt{raw\_symptom}
+          & \texttt{ebi\_name}, \texttt{ebi\_code}, \texttt{synonyms} \\
+        \addlinespace
+        3 & \href{https://infocentral.infoway-inforoute.ca}{Canada Health Infoway FHIR}
+            (SNOMED CT CA)
+          & OAuth2 client credentials
+          & \texttt{raw\_symptom}
+          & \texttt{infoway\_name}, \texttt{infoway\_code} \\
+        \addlinespace
+        4 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API}
+            (LOINC)
+          & \texttt{UMLS\_API\_KEY}
+          & \texttt{test} (unique values only)
+          & \texttt{loinc\_code} \\
+        \addlinespace
+        5 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API}
+            (ICD-10, WHO international)
+          & \texttt{UMLS\_API\_KEY}
+          & \texttt{condition} (unique values only)
+          & \texttt{icd10\_code} \\
+        \addlinespace
+        6 & \href{https://infocentral.infoway-inforoute.ca}{Canada Health Infoway FHIR}
+            (ICD-10-CA)
+          & OAuth2 client credentials
+          & \texttt{condition} (unique values only)
+          & \texttt{icd10ca\_code} \\
+        \addlinespace
+        7 & \href{https://lhncbc.nlm.nih.gov/RxNav/APIs/index.html}{NLM RxNorm} \&
+            \href{https://open.fda.gov/apis/}{OpenFDA}
+          & None
+          & \texttt{treatment} (where present)
+          & \texttt{rxcui}, \texttt{adverse\_event} \\
+        \addlinespace
+        8 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API}
+          & None
+          & \texttt{symptom} $\rightarrow$ \texttt{condition}
+            (\texttt{INDICATES\_CONDITION})
+          & \texttt{literature\_articles}, \texttt{literature\_patents} \\
+        \addlinespace
+        9 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API}
+          & None
+          & \texttt{condition} $\rightarrow$ \texttt{test}
+            (\texttt{REQUIRES\_TEST})
+          & \texttt{literature\_articles}, \texttt{literature\_patents} \\
+        \addlinespace
+        10 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API}
+          & None
+          & \texttt{symptom} $\rightarrow$ \texttt{test}
+            (\texttt{DIRECTLY\_INDICATES\_TEST})
+          & \texttt{literature\_articles}, \texttt{literature\_patents} \\
+        \addlinespace
+        11 & \href{https://clinicaltrials.gov/api/gui}{ClinicalTrials.gov v2}
+          & None
+          & \texttt{condition} $\rightarrow$ \texttt{treatment}
+            (\texttt{RECOMMENDS\_TREATMENT})
+          & \texttt{trial\_count} \\
+        \bottomrule
+    \end{tabular}}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\newpage
+\section{Multi-Agent Graph Audit Pipeline}
+\label{app:audit}
+
+\subsection*{Audit Unit and Triad Extraction}
+
+The unit of audit is a clinical triad: a (finding $\rightarrow$ condition
+$\rightarrow$ test) path extracted by traversing \texttt{INDICATES\_CONDITION}
+followed by \texttt{REQUIRES\_TEST} edges. Three-hop paths are preferred over
+\texttt{DIRECTLY\_INDICATES\_TEST} shortcuts because they carry the condition
+context necessary for clinical validation. Triads are deduplicated on (finding,
+test) pairs and sorted by clinical acuity (HIGH $\rightarrow$ MODERATE
+$\rightarrow$ STANDARD) to prioritise the most time-critical pathways first.
+
+\subsection*{Persona Descriptions}
+
+Four personas operate sequentially on each triad. Personas A--C produce
+independent assessments with no shared context at inference time; Persona D
+synthesizes their outputs into a final verdict.
+
+\paragraph{Persona A — Protocol \& Triage Enforcer.}
+The only persona with external tool access. Persona A queries a local ChromaDB
+vector database built from the EPFL clinical guidelines dataset, retrieving the
+top-5 most relevant passages via semantic search filtered by test type. Outputs
+include a structured \texttt{support\_level} (\textit{strong} $|$
+\textit{moderate} $|$ \textit{weak} $|$ \textit{none}), a matched guideline
+reference, whether a validated clinical decision rule is required before
+ordering, and a Choosing Wisely flag.
+
+\paragraph{Persona B — Rapid Diagnostics Researcher.}
+Operates without an LLM call. Persona B queries Semantic Scholar for literature
+co-evidence on the condition--test pair (with Europe PMC as fallback), returning
+paper count, mean publication year (classified as \textit{current} $\geq 2020$,
+\textit{aging} $\geq 2015$, \textit{outdated} $< 2015$), and keyword flags
+indicating whether point-of-care alternatives or negative predictive value
+evidence appear in retrieved abstracts.
+
+\paragraph{Persona C — ED Attending.}
+A pure LLM call with no tool access. Persona C evaluates clinical flow
+pragmatics: over-testing risk, under-testing risk, safe discharge logic,
+wrong-test detection, and whether the pathway constitutes never-event mitigation
+— i.e., whether the test is mandated to catch a catastrophic, time-sensitive
+diagnosis.
+
+\paragraph{Persona D — ED Medical Director.}
+Receives the full structured outputs of Personas A, B, and C and synthesizes a
+final \texttt{audit\_status} (\textit{Verified} $|$ \textit{Flagged for Review}
+$|$ \textit{Rejected}) and a \texttt{confidence\_score} $\in [0, 1]$. The
+weighting scheme is explicit: Persona A carries the dominant weight; Persona B
+adjusts confidence by up to $\pm 0.15$ based on literature recency and paper
+count; Persona C's \texttt{pathway\_is\_never\_event\_mitigation} flag adds
+$+0.10$, while \texttt{wrong\_test\_concern} is a hard-flag trigger regardless
+of other scores.
+
+\subsection*{Hard-Flag Triggers}
+
+Three conditions unconditionally produce a \textit{Flagged for Review} verdict,
+bypassing the scoring logic:
+\begin{enumerate}
+    \item Persona C raises \texttt{wrong\_test\_concern}, indicating a genuine
+    clinical error in the Knowledge Graph.
+    \item Persona A raises a Choosing Wisely flag.
+    \item A rule-out pathway has zero guideline support and zero literature
+    evidence simultaneously.
+\end{enumerate}
+
+\subsection*{Audit Metadata and Checkpointing}
+
+Audit results are written back to the graph in-place. Each audited edge
+receives \texttt{audit\_status}, \texttt{confidence\_score},
+\texttt{last\_audited}, persona-level sub-scores, and \texttt{audit\_rationale}
+as edge attributes, making results queryable during GraphRAG retrieval. A
+complete \texttt{audit\_report.json} is also produced containing per-triad
+detail and a summary of verified, flagged, and rejected counts with mean
+confidence. To manage LLM call volume over a fully enumerated graph, completed
+triad results are cached and skipped on re-invocation via a \texttt{--resume}
+flag.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\newpage
+\section{Detailed Imputation Methodologies}
+
+\subsection*{Knowledge Graph Traversal Algorithm}
+\label{app:kg_matching}
+
+Algorithm~\ref{alg:kg_imputation} formalizes the deterministic substring
+matching and graph traversal procedure. The bidirectional substring check
+captures clinical shorthand and abbreviations; 1-hop and 2-hop traversal
+identifies both directly indicated tests and condition-mediated test
+requirements.
+
+\begin{algorithm}[htbp]
+\caption{Knowledge Graph Entity Matching and Test Imputation}
+\label{alg:kg_imputation}
+\begin{algorithmic}[1]
+\Require Patient diagnosis string $D$, Knowledge Graph $G=(V, E)$, minimum node threshold $\tau$
+\Ensure Set of imputed diagnostic tests $P$
+
+\State $T \gets \text{Split}(D, \texttt{";"})$ \Comment{Isolate terms from compound diagnosis}
+\State $M \gets \emptyset$ \Comment{Matched KG nodes}
+
+\State \textbf{Step 1: Bidirectional Substring Matching}
+\For{each $t \in T$}
+    \State $t \gets \text{Lowercase}(\text{Strip}(t))$
+    \For{each $v \in V$ where $\text{Type}(v) \in \{\text{Condition, Symptom, Risk\_Factor, \ldots}\}$}
+        \State $L \gets \text{Lowercase}(\text{Label}(v))$
+        \If{$t \subseteq L$ \textbf{or} $L \subseteq t$}
+            \State $M \gets M \cup \{v\}$
+        \EndIf
+    \EndFor
+\EndFor
+
+\State \textbf{Step 2: Graph Traversal and Test Voting}
+\State $\mathit{TestCounts} \gets \text{empty map}$ \Comment{Unique nodes indicating each test}
+\For{each $m \in M$}
+    \State $\mathit{TestsForM} \gets \emptyset$
+    \For{each outgoing edge $(m, u) \in E$}
+        \If{$\text{Relation}(m,u) \in \{\texttt{REQUIRES\_TEST},\; \texttt{DIRECTLY\_INDICATES\_TEST}\}$}
+            \State $\mathit{TestsForM} \gets \mathit{TestsForM} \cup \{u\}$ \Comment{1-hop}
+        \ElsIf{$\text{Relation}(m,u) = \texttt{INDICATES\_CONDITION}$}
+            \For{each outgoing edge $(u, w) \in E$}
+                \If{$\text{Relation}(u,w) = \texttt{REQUIRES\_TEST}$}
+                    \State $\mathit{TestsForM} \gets \mathit{TestsForM} \cup \{w\}$ \Comment{2-hop}
+                \EndIf
+            \EndFor
+        \EndIf
+    \EndFor
+    \For{each $test \in \mathit{TestsForM}$}
+        \State $\mathit{TestCounts}[test] \gets \mathit{TestCounts}[test] + 1$
+    \EndFor
+\EndFor
+
+\State \textbf{Step 3: Threshold Filtering}
+\State $P \gets \{test \mid \mathit{TestCounts}[test] \geq \tau\}$
+\State \Return $P$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection*{Semantic Retrieval and Score Aggregation}
+\label{app:semantic_matching}
+
+Algorithm~\ref{alg:semantic_imputation} formalizes the GraphRAG semantic
+pipeline. Patient diagnoses are embedded using the MedEmbed biomedical language
+model and queried against a ChromaDB vector store. Before accepting a match, a
+six-token negation window scans the original text for tokens such as \textit{no,
+not, denies, without, absent, negative for, rules out}; matches under negation
+are discarded. Instead of discrete voting, each matched node contributes its
+cosine similarity score to the tests it indicates, and tests are filtered by an
+aggregate score threshold $\theta$.
+
+\begin{algorithm}[htbp]
+\caption{GraphRAG Semantic Retrieval and Score-Based Imputation}
+\label{alg:semantic_imputation}
+\begin{algorithmic}[1]
+\Require Patient diagnosis $D$, Knowledge Graph $G=(V,E)$, Vector Store $\mathcal{V}$, thresholds $k, s_{\min}, \theta$
+\Ensure Set of imputed diagnostic tests $P$
+
+\State $T \gets \text{Split}(D, \texttt{";"})$ \Comment{Isolate terms from compound diagnosis}
+\State $M \gets \text{empty map}$ \Comment{Max cosine score per matched KG node}
+
+\State \textbf{Step 1: Vector Search and Negation Filtering}
+\For{each $t \in T$}
+    \State $E_t \gets \text{Embed}(t)$
+    \State $\mathit{Candidates} \gets \text{QueryVectorStore}(\mathcal{V},\, E_t,\, \text{top\_k}=k)$
+    \For{each $c \in \mathit{Candidates}$}
+        \State $score \gets 1.0 - c.\text{distance}$ \Comment{Distance to cosine similarity}
+        \If{$score \geq s_{\min}$ \textbf{and not} $\text{IsNegated}(D,\, c.\text{label},\, \text{window}=6)$}
+            \State $M[c.\text{node}] \gets \max\bigl(M.\text{get}(c.\text{node},\, 0),\; score\bigr)$
+        \EndIf
+    \EndFor
+\EndFor
+
+\State \textbf{Step 2: Graph Traversal and Score Aggregation}
+\State $\mathit{TestScores} \gets \text{empty map}$
+\For{each $(m,\, score) \in M$}
+    \State $\mathit{TestsForM} \gets \emptyset$
+    \For{each outgoing edge $(m, u) \in E$}
+        \If{$\text{Relation}(m,u) \in \{\texttt{REQUIRES\_TEST},\; \texttt{DIRECTLY\_INDICATES\_TEST}\}$}
+            \State $\mathit{TestsForM} \gets \mathit{TestsForM} \cup \{u\}$
+        \ElsIf{$\text{Relation}(m,u) = \texttt{INDICATES\_CONDITION}$}
+            \For{each outgoing edge $(u, w) \in E$}
+                \If{$\text{Relation}(u,w) = \texttt{REQUIRES\_TEST}$}
+                    \State $\mathit{TestsForM} \gets \mathit{TestsForM} \cup \{w\}$
+                \EndIf
+            \EndFor
+        \EndIf
+    \EndFor
+    \For{each $test \in \mathit{TestsForM}$}
+        \State $\mathit{TestScores}[test] \gets \mathit{TestScores}.\text{get}(test,\, 0) + score$
+    \EndFor
+\EndFor
+
+\State \textbf{Step 3: Aggregate Thresholding}
+\State $P \gets \{test \mid \mathit{TestScores}[test] \geq \theta\}$
+\State \Return $P$
+\end{algorithmic}
+\end{algorithm}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\newpage
+\section{Computational Latency Benchmarks}
+\label{app:latency_benchmarks}
+
+To isolate the computational bottleneck within the GraphRAG semantic pipeline,
+benchmarking separated inference into two phases: entity matching (embedding
+generation and vector search) and graph traversal (score aggregation and test
+imputation). Table~\ref{tab:latency_benchmarks} reports mean latency across 50
+iterations for the matching phase and 25 iterations for the full end-to-end
+pipeline.
+
+The overwhelming majority of latency in the semantic pipeline occurs during
+Phase 1, driven by the computational cost of the local biomedical embedding
+model. The subsequent graph traversal (Phase 2) adds only ${\sim}37$\,ms
+overhead, confirming that the bottleneck is the encoder rather than graph
+structure.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Computational latency benchmarks comparing the baseline lexical
+    string matching strategy against the GraphRAG semantic retrieval pipeline.}
+    \label{tab:latency_benchmarks}
+    \small
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Metric} & \textbf{String Matching} & \textbf{Semantic (GraphRAG)} \\
+        \midrule
+        \textbf{Cold-Start Initialization} & & \\
+        \hspace{3mm} KG Pickle / Model Load & 6.16\,ms & 17{,}745.32\,ms \\
+        \addlinespace
+        \textbf{Per-Encounter Latency} & & \\
+        \hspace{3mm} Phase 1: Entity Matching Only & 0.42\,ms & 137.92\,ms \\
+        \hspace{3mm} Phase 2: Full Pipeline (w/ Traversal) & 0.55\,ms & 175.54\,ms \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\newpage
+\section{Diagnotix Web Application Architecture}
+\label{app:diagnotix}
+
+Diagnotix is built on a React~19, TypeScript, and Vite frontend coupled with a
+Python~3.12 FastAPI backend. The system supports LLM integration through both
+Nebius (Kimi-K2.5-fast) and Azure OpenAI. The application is divided into two
+primary operational modes: \textit{Navigate} and \textit{Analyze}.
+
+\subsection*{Navigate Mode}
+
+Navigate Mode is the default visual exploration interface for the clinical
+Knowledge Graph.
+\begin{itemize}
+    \item \textbf{Interactive Graph Canvas.} A force-directed 2D visualization
+    powered by \texttt{react-force-graph-2d}.
+    \item \textbf{Pathway Picker.} Filters the visualization to the 1-hop
+    subgraph of a selected diagnostic test (e.g., ECG, Appendix Ultrasound). An
+    ``All Pathways'' option reveals the full macroscopic graph structure.
+    \item \textbf{Node Search \& Legend.} Facilitates node search by label with
+    an interactive legend for toggling node-type visibility.
+    \item \textbf{Dynamic Pathway Generation.} Users input a novel diagnostic
+    test (e.g., CT Head), triggering a backend pipeline that grounds itself via
+    RAG over Qdrant and live Semantic Scholar abstracts to generate 8--15 triage
+    rules (up to 3 convergence iterations). New rules are appended to
+    \texttt{guideline\_rules.json} and the Knowledge Graph is rebuilt; only the
+    delta (new nodes and edges) is returned to the canvas, avoiding full page
+    reloads.
+\end{itemize}
+
+\subsection*{Analyze Mode}
+
+Analyze Mode provides a conversational interface for a selected diagnostic
+pathway.
+\begin{itemize}
+    \item \textbf{Contextual Injection.} The selected pathway's subgraph (nodes
+    and edges) is injected directly into the LLM context window.
+    \item \textbf{Evidence-Grounded Generation.} Responses from Nebius
+    Kimi-K2.5-fast are enriched by RAG retrieval from clinical guidelines
+    (Qdrant) and live Semantic Scholar abstracts; all outputs are cited.
+    \item \textbf{State Management.} Multi-turn conversation history is
+    preserved independently per pathway.
+\end{itemize}
+
+\subsection*{Backend API Endpoints}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Diagnotix FastAPI backend endpoints.}
+    \label{tab:api_endpoints}
+    \small
+    \resizebox{\linewidth}{!}{%
+    \begin{tabular}{ll}
+        \toprule
+        \textbf{Endpoint} & \textbf{Purpose} \\
+        \midrule
+        \texttt{GET /api/tests}
+          & Retrieve a list of all diagnostic test nodes. \\
+        \addlinespace
+        \texttt{GET /api/graph?pathway=\textless{}name\textgreater}
+          & Retrieve the full graph or a specific 1-hop pathway subgraph. \\
+        \addlinespace
+        \texttt{POST /api/add\_test}
+          & Execute the LLM pipeline to generate rules; return the node/edge diff. \\
+        \addlinespace
+        \texttt{POST /api/chat}
+          & Initialize clinical chat with RAG and Semantic Scholar grounding. \\
+        \bottomrule
+    \end{tabular}}
+\end{table}
