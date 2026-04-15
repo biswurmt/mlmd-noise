@@ -10,14 +10,14 @@
  \usepackage{longtable}% for long tables
  % The booktabs package is used by this sample document
  % (it provides \toprule, \midrule and \bottomrule).
- % 
+ %
  % book quality tables
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{color, soul}
-\usepackage{booktabs} 
+\usepackage{booktabs}
 \usepackage{tabularx}
 \usepackage{multirow}
 
@@ -52,16 +52,16 @@
 \title[Decoding Triage]{Reading Between the Lines: Knowledge-Grounded LLM Imputation and Meta-Learning for Noisy Data in Pediatric Emergency Triage}
 
 \author{\Name{Alice Chua}
-       \Email{alice.chua@mail.utoronto.ca}\\ 
+       \Email{alice.chua@mail.utoronto.ca}\\
        \addr Department of Computer Science\\
        University of Toronto\\
-       Toronto, Ontario, Canada 
+       Toronto, Ontario, Canada
        \AND
        \Name{Firstname Lastname}
-       \Email{name@email.edu}\\ 
+       \Email{name@email.edu}\\
        \addr Department\\
        University\\
-       City, State, Country} 
+       City, State, Country}
 
 \begin{document}
 
@@ -145,17 +145,17 @@ To ensure the MLMD system operates under realistic clinical constraints, predict
 
 \subsection{SickKids Cohort Selection}
 This retrospective study utilized electronic health record (EHR) data from pediatric patients (aged 0–18 years) presenting to the SickKids Emergency Department between June 2018 and January 2026. We excluded patients who left without being seen (LWBS) ($n=25,397$), encounters lacking valid triage timestamps ($n=0$), and encounters missing free-text clinical diagnoses necessary for imputation inference ($n=11,396$).
- 
+
 Following these exclusions, the final cohort comprised $N = 483,705$ unique ED encounters. The median patient age was 5.0 years (IQR: 2.0–10.0), with a biological sex distribution of 54.1\% male and 45.8\% female. Across the four diagnostic pathways targeted by the MLMD, the baseline prevalence of documented positive labels was as follows: Arm X-Rays ($n = 1,904$), ECGs ($n = 12,236$), Appendix Ultrasounds ($n = 3,293$), and Testicular Ultrasounds ($n = 2,889$).
 
 \subsection{\hl{Evaluation Approach and Study Design}}
 To simulate real-world prospective deployment, the cohort was temporally partitioned: encounters from [Year] to [Year] were used for model training and hyperparameter tuning ($X$\%), while encounters from [Year] were reserved as a holdout testing set ($Y$\%). Because our framework involves both a data-cleaning phase and a predictive phase, our evaluation strategy is bifurcated accordingly.
 
-\paragraph{Label Imputation Evaluation.} 
+\paragraph{Label Imputation Evaluation.}
 First, we evaluate the efficacy of the KG imputation pipeline. The incumbent clinician-validated regex extraction system serves as our high-precision, low-recall baseline. A successful imputation strategy must minimally capture the established regex true positives (ensuring no loss of institutional knowledge) while identifying novel false negatives (unlabeled patients who genuinely required tests). To validate these novel "discoveries" and establish a pristine ground truth for the test set, a clinical domain expert manually conducted a retrospective chart review on a random sample of $n = \text{[Insert Number]}$ newly imputed labels to confirm their clinical validity.
 
 \paragraph{Downstream MLMD Model Evaluation.}
-Second, we evaluate the impact of this label imputation on the downstream predictive MLMD model. We compare the performance of our LiLAW architecture trained on the KG-imputed dataset against three baselines: 1) a classifier trained on the regex-imputed labels, 2) a classifier trained with LiLaw, and 3) a classifier trained on KG-imputed labels. 
+Second, we evaluate the impact of this label imputation on the downstream predictive MLMD model. We compare the performance of our LiLAW architecture trained on the KG-imputed dataset against three baselines: 1) a classifier trained on the regex-imputed labels, 2) a classifier trained with LiLaw, and 3) a classifier trained on KG-imputed labels.
 
 Model performance was evaluated using standard classification metrics, prioritized by their operational implications for the ED. Because the primary objective of this framework is to rectify historical False Negatives, \textbf{Recall (Sensitivity)} serves as our primary evaluation metric, quantifying the retrained system's improved ability to successfully parallelize care by capturing patients who require diagnostics. Precision and False Positive Rate (FPR) act as vital safety constraints, ensuring the MLMD does not inadvertently burden ancillary departments (e.g., radiology, cardiology) with unwarranted test authorizations. Finally, we report the Area Under the Receiver Operating Characteristic Curve (AUROC) and the $F_1$-score to capture overall discriminative capability in the presence of severe class imbalance.
 
@@ -196,12 +196,12 @@ Table~\ref{tab:imputation_results} highlights a stark contrast between lexical a
     }
 \end{table}
 
-Conversely, the GraphRAG Semantic Retrieval pipeline demonstrated balanced performance, yielding 11,110 total discoveries. It maintained exceptional precision on Testicular Ultrasounds (0.944) while successfully navigating the variable presentations of Arm X-Rays (Recall: 0.733). 
+Conversely, the GraphRAG Semantic Retrieval pipeline demonstrated balanced performance, yielding 11,110 total discoveries. It maintained exceptional precision on Testicular Ultrasounds (0.944) while successfully navigating the variable presentations of Arm X-Rays (Recall: 0.733).
 
 To ensure these model-generated discoveries represent true clinical needs rather than algorithmic hallucinations, a clinician manually reviewed a random sample. Out of [TODO: Insert Total Sample Size] reviewed discoveries, [TODO: Insert \%]\% were verified as genuinely indicated tests, including an accuracy rate of [TODO: Insert \%]\% for ECGs and [TODO: Insert \%]\% for Arm X-Rays. This confirms that GraphRAG effectively densifies training labels by capturing implicit clinical indications that legacy rules overlook.
 
 \subsection{\hl{Downstream MLMD Performance}}
-We conducted an ablation study across four training paradigms to isolate the impact of our pipeline. As summarized in Table~\ref{tab:downstream_performance}, the baseline is a standard classifier trained on noisy Regex labels, evaluated on a holdout set prioritizing Recall (operational efficiency) and Precision (safety against over-testing). 
+We conducted an ablation study across four training paradigms to isolate the impact of our pipeline. As summarized in Table~\ref{tab:downstream_performance}, the baseline is a standard classifier trained on noisy Regex labels, evaluated on a holdout set prioritizing Recall (operational efficiency) and Precision (safety against over-testing).
 
 \begin{table}[htbp]
     \centering
@@ -266,7 +266,7 @@ A detailed breakdown of team responsibilities, encompassing both the technical i
 \label{tab:contributions}
 \begin{tabularx}{\textwidth}{@{} l l X @{}}
 \toprule
-\textbf{Report Section} & \textbf{Primary Author} & \textbf{Technical Contribution} \\ 
+\textbf{Report Section} & \textbf{Primary Author} & \textbf{Technical Contribution} \\
 \midrule
 
 Introduction & Alice & Main narrative and generalizable healthcare insights. \\ \addlinespace
@@ -288,7 +288,7 @@ MLMD Performance & Alice \& Tyler & \textbf{Alice:} Impact of Label Imputation. 
 Efficiency Benchmarks & Alice & Computational efficiency and inference latency. \\ \addlinespace
 
 \midrule
-Discussion & ??? & Joint interpretation of findings and future work proposals. \\ 
+Discussion & ??? & Joint interpretation of findings and future work proposals. \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -296,75 +296,75 @@ Discussion & ??? & Joint interpretation of findings and future work proposals. \
 \newpage
 \section{Ontology Enrichment via External APIs}
 \label{app:api_integration}
-To ensure interoperability and standardize clinical entities, our pipeline queries 
-eight external APIs to attach standard medical codes and evidence metadata to each 
+To ensure interoperability and standardize clinical entities, our pipeline queries
+eight external APIs to attach standard medical codes and evidence metadata to each
 extracted record. Table~\ref{tab:api_breakdown} outlines this sequential enrichment process.
 \begin{table}[htbp]
     \centering
-    \caption{Detailed breakdown of the API integration steps, targeted ontologies, 
+    \caption{Detailed breakdown of the API integration steps, targeted ontologies,
     and resulting dataset schema modifications.}
     \label{tab:api_breakdown}
     \begin{tabular}{c p{0.25\textwidth} p{0.15\textwidth} p{0.20\textwidth} p{0.25\textwidth}}
         \toprule
-        \textbf{Step} & \textbf{API (Target Ontology)} & \textbf{Credential} & 
+        \textbf{Step} & \textbf{API (Target Ontology)} & \textbf{Credential} &
         \textbf{Enriched Entity} & \textbf{Column(s) Added} \\
         \midrule
-        2 & \href{https://www.ebi.ac.uk/ols4}{EMBL-EBI OLS4} \newline (HP/MONDO/EFO) 
-          & None 
-          & \texttt{raw\_symptom} 
+        2 & \href{https://www.ebi.ac.uk/ols4}{EMBL-EBI OLS4} \newline (HP/MONDO/EFO)
+          & None
+          & \texttt{raw\_symptom}
           & \texttt{ebi\_name}, \texttt{ebi\_code}, \texttt{synonyms} \\
         \addlinespace
-        3 & \href{https://infocentral.infoway-inforoute.ca/en/advanced-users}{Canada Health 
-            Infoway FHIR} (SNOMED CT CA) 
-          & OAuth2 client credentials 
-          & \texttt{raw\_symptom} 
+        3 & \href{https://infocentral.infoway-inforoute.ca/en/advanced-users}{Canada Health
+            Infoway FHIR} (SNOMED CT CA)
+          & OAuth2 client credentials
+          & \texttt{raw\_symptom}
           & \texttt{infoway\_name}, \texttt{infoway\_code} \\
         \addlinespace
-        4 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API} 
-            \newline (LOINC) 
-          & \texttt{UMLS\_API\_KEY} 
-          & \texttt{test} \newline (unique values only) 
+        4 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API}
+            \newline (LOINC)
+          & \texttt{UMLS\_API\_KEY}
+          & \texttt{test} \newline (unique values only)
           & \texttt{loinc\_code} \\
         \addlinespace
-        5 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API} 
-            \newline (ICD-10, WHO international) 
-          & \texttt{UMLS\_API\_KEY} 
-          & \texttt{condition} \newline (unique values only) 
+        5 & \href{https://documentation.uts.nlm.nih.gov/rest/home.html}{UMLS REST API}
+            \newline (ICD-10, WHO international)
+          & \texttt{UMLS\_API\_KEY}
+          & \texttt{condition} \newline (unique values only)
           & \texttt{icd10\_code} \\
         \addlinespace
-        6 & \href{https://infocentral.infoway-inforoute.ca/en/advanced-users}{Canada Health 
-            Infoway FHIR} (ICD-10-CA) 
-          & OAuth2 client credentials 
-          & \texttt{condition} \newline (unique values only) 
+        6 & \href{https://infocentral.infoway-inforoute.ca/en/advanced-users}{Canada Health
+            Infoway FHIR} (ICD-10-CA)
+          & OAuth2 client credentials
+          & \texttt{condition} \newline (unique values only)
           & \texttt{icd10ca\_code} \\
         \addlinespace
-        7 & \href{https://lhncbc.nlm.nih.gov/RxNav/APIs/index.html}{NLM RxNorm} \& 
-            \newline \href{https://open.fda.gov/apis/}{OpenFDA} 
-          & None 
-          & \texttt{treatment} \newline (where present) 
+        7 & \href{https://lhncbc.nlm.nih.gov/RxNav/APIs/index.html}{NLM RxNorm} \&
+            \newline \href{https://open.fda.gov/apis/}{OpenFDA}
+          & None
+          & \texttt{treatment} \newline (where present)
           & \texttt{rxcui}, \texttt{adverse\_event} \\
         \addlinespace
-        8 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API} 
-          & None 
-          & \texttt{symptom} $\rightarrow$ \texttt{condition} \newline 
+        8 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API}
+          & None
+          & \texttt{symptom} $\rightarrow$ \texttt{condition} \newline
             (\texttt{INDICATES\_CONDITION})
           & \texttt{literature\_articles}, \texttt{literature\_patents} \\
         \addlinespace
-        9 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API} 
-          & None 
-          & \texttt{condition} $\rightarrow$ \texttt{test} \newline 
+        9 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API}
+          & None
+          & \texttt{condition} $\rightarrow$ \texttt{test} \newline
             (\texttt{REQUIRES\_TEST})
           & \texttt{literature\_articles}, \texttt{literature\_patents} \\
         \addlinespace
-        10 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API} 
-          & None 
-          & \texttt{symptom} $\rightarrow$ \texttt{test} \newline 
+        10 & \href{https://europepmc.org/RestfulWebService}{Europe PMC REST API}
+          & None
+          & \texttt{symptom} $\rightarrow$ \texttt{test} \newline
             (\texttt{DIRECTLY\_INDICATES\_TEST})
           & \texttt{literature\_articles}, \texttt{literature\_patents} \\
         \addlinespace
-        11 & \href{https://clinicaltrials.gov/api/gui}{ClinicalTrials.gov v2} 
-          & None 
-          & \texttt{condition} $\rightarrow$ \texttt{treatment} \newline 
+        11 & \href{https://clinicaltrials.gov/api/gui}{ClinicalTrials.gov v2}
+          & None
+          & \texttt{condition} $\rightarrow$ \texttt{treatment} \newline
             (\texttt{RECOMMENDS\_TREATMENT})
           & \texttt{trial\_count} \\
         \bottomrule
@@ -375,17 +375,17 @@ extracted record. Table~\ref{tab:api_breakdown} outlines this sequential enrichm
 \label{app:audit}
 
 \subsection*{Audit Unit and Triad Extraction}
-The unit of audit is a clinical triad: a (finding $\rightarrow$ condition $\rightarrow$ 
-test) path extracted by traversing \texttt{INDICATES\_CONDITION} followed by 
-\texttt{REQUIRES\_TEST} edges. Three-hop paths are preferred over 
-\texttt{DIRECTLY\_INDICATES\_TEST} shortcuts because they carry condition context 
-necessary for clinical validation. Triads are deduplicated on (finding, test) pairs and 
-sorted by clinical acuity (HIGH $\rightarrow$ MODERATE $\rightarrow$ STANDARD) to 
+The unit of audit is a clinical triad: a (finding $\rightarrow$ condition $\rightarrow$
+test) path extracted by traversing \texttt{INDICATES\_CONDITION} followed by
+\texttt{REQUIRES\_TEST} edges. Three-hop paths are preferred over
+\texttt{DIRECTLY\_INDICATES\_TEST} shortcuts because they carry condition context
+necessary for clinical validation. Triads are deduplicated on (finding, test) pairs and
+sorted by clinical acuity (HIGH $\rightarrow$ MODERATE $\rightarrow$ STANDARD) to
 prioritise the most time-critical pathways.
 
 \subsection*{Persona Descriptions}
-Four personas operate sequentially on each triad. Personas A--C produce independent 
-assessments with no shared context at inference time; Persona D synthesizes their outputs 
+Four personas operate sequentially on each triad. Personas A--C produce independent
+assessments with no shared context at inference time; Persona D synthesizes their outputs
 into a final verdict.
 
 \paragraph{Persona A — Protocol \& Triage Enforcer.}
@@ -395,30 +395,30 @@ The only persona with external tool access. Persona A queries a local ChromaDB v
 Operates without an LLM. Persona B queries Semantic Scholar for literature co-evidence on the condition--test pair (with Europe PMC as fallback), returning paper count, mean publication year (classified as \textit{current} $\geq$ 2020, \textit{aging} $\geq$ 2015, \textit{outdated} $<$ 2015), and keyword flags indicating whether point-of-care alternatives or negative predictive value evidence appear in retrieved abstracts.
 
 \paragraph{Persona C — ED Attending.}
-A pure LLM call with no tool access. Persona C evaluates clinical flow pragmatics: 
+A pure LLM call with no tool access. Persona C evaluates clinical flow pragmatics:
 over-testing, under-testing, safe discharge logic, wrong-test detection, and whether the pathway constitutes never-event mitigation — i.e., whether the test is mandated to catch a catastrophic, time-sensitive diagnosis.
 
 \paragraph{Persona D — ED Medical Director.}
 Receives the full structured outputs of Personas A, B, and C and synthesizes a final \texttt{audit\_status} (\textit{Verified} $|$ \textit{Flagged for Review} $|$ \textit{Rejected}) and a \texttt{confidence\_score} $\in [0, 1]$. The weighting scheme is explicit: Persona A carries the dominant weight; Persona B adjusts confidence by up to $\pm 0.15$ based on literature recency and paper count; Persona C's \texttt{pathway\_is\_never\_event\_mitigation} flag adds $+0.10$, while \texttt{wrong\_test\_concern} is a hard-flag trigger regardless of other scores.
 
 \subsection*{Hard-Flag Triggers}
-Three conditions unconditionally produce a \textit{Flagged for Review} verdict, bypassing 
+Three conditions unconditionally produce a \textit{Flagged for Review} verdict, bypassing
 the scoring logic:
 \begin{enumerate}
-    \item Persona C raises \texttt{wrong\_test\_concern}, indicating a genuine clinical 
+    \item Persona C raises \texttt{wrong\_test\_concern}, indicating a genuine clinical
     error in the KG.
     \item Persona A raises a Choosing Wisely flag.
-    \item A rule-out pathway has zero guideline support and zero literature evidence 
+    \item A rule-out pathway has zero guideline support and zero literature evidence
     simultaneously.
 \end{enumerate}
 
 \subsection*{Audit Metadata and Checkpointing}
-Audit results are written back to the graph in-place. Each audited edge receives 
-\texttt{audit\_status}, \texttt{confidence\_score}, \texttt{last\_audited}, persona-level 
-sub-scores, and \texttt{audit\_rationale} as edge attributes, making results queryable 
-during GraphRAG retrieval. A complete \texttt{audit\_report.json} is also produced 
-containing per-triad detail and a summary of verified, flagged, and rejected counts with 
-mean confidence. To manage LLM call volume over a fully enumerated graph, completed 
+Audit results are written back to the graph in-place. Each audited edge receives
+\texttt{audit\_status}, \texttt{confidence\_score}, \texttt{last\_audited}, persona-level
+sub-scores, and \texttt{audit\_rationale} as edge attributes, making results queryable
+during GraphRAG retrieval. A complete \texttt{audit\_report.json} is also produced
+containing per-triad detail and a summary of verified, flagged, and rejected counts with
+mean confidence. To manage LLM call volume over a fully enumerated graph, completed
 triad results are cached and skipped on re-invocation via a \texttt{--resume} flag.
 
 \section{Detailed Imputation Methodologies}
@@ -456,7 +456,7 @@ $TestCounts \gets \text{Empty Map}$ \tcp*{Tracks how many unique nodes indicate 
 
 \ForEach{$m \in M$}{
     $TestsForM \gets \emptyset$\;
-    
+
     \ForEach{outgoing edges $(m, u) \in E$}{
         \uIf{$\text{Relation}(m, u) \in \{\text{\small REQUIRES\_TEST}, \text{\small DIRECTLY\_INDICATES\_TEST}\}$}{
             $TestsForM \gets TestsForM \cup \{u\}$ \tcp*{1-hop traversal}
@@ -469,7 +469,7 @@ $TestCounts \gets \text{Empty Map}$ \tcp*{Tracks how many unique nodes indicate 
             }
         }
     }
-    
+
     \ForEach{$test \in TestsForM$}{
         $TestCounts[test] \gets TestCounts[test] + 1$\;
     }
@@ -483,7 +483,7 @@ $P \gets \{test \mid TestCounts[test] \ge \tau\}$\;
 
 \subsection*{Semantic Retrieval and Score Aggregation}
 \label{app:semantic_matching}
-To capture semantic nuance beyond exact string matching, we embed the Knowledge Graph nodes into a local ChromaDB vector store using the \texttt{sentence-transformers} biomedical model (MedEmbed/MedEIR). Patient diagnosis strings are similarly embedded and queried against this space. 
+To capture semantic nuance beyond exact string matching, we embed the Knowledge Graph nodes into a local ChromaDB vector store using the \texttt{sentence-transformers} biomedical model (MedEmbed/MedEIR). Patient diagnosis strings are similarly embedded and queried against this space.
 
 As detailed in Algorithm \ref{alg:semantic_imputation}, we convert the returned vector distances to cosine similarities. Matches below a baseline semantic threshold ($s_{min}$) are discarded. Crucially, before accepting a semantic match, a heuristic negation filter scans a six-token window preceding the matched label in the original text. If a negation token (e.g., \textit{no, not, denies, without, absent, negative for, rules out}) is detected, the match is discarded. Finally, we traverse the graph to identify indicated tests. Instead of a discrete vote, we sum the cosine similarity scores of all nodes recommending a specific test and filter the final set using an aggregate score threshold ($\theta$).
 
@@ -501,10 +501,10 @@ $M \gets \text{Empty Map}$ \tcp*{Tracks maximum semantic score per matched KG no
 \ForEach{$t \in T$}{
     $E_t \gets \text{Embed}(t)$\;
     $Candidates \gets \text{QueryVectorStore}(\mathcal{V}, E_t, \text{top\_k}=k)$\;
-    
+
     \ForEach{$c \in Candidates$}{
         $score \gets 1.0 - c.\text{distance}$ \tcp*{Convert distance to cosine similarity}
-        
+
         \uIf{$score \ge s_{min}$}{
             \If{\textbf{not} $\text{IsNegated}(D, c.\text{label}, \text{window}=6)$}{
                 \tcp{Retain the highest similarity score if node matched multiple times}
@@ -520,7 +520,7 @@ $TestScores \gets \text{Empty Map}$ \tcp*{Tracks aggregate cosine score per test
 
 \ForEach{$(m, score) \in M$}{
     $TestsForM \gets \emptyset$\;
-    
+
     \ForEach{outgoing edges $(m, u) \in E$}{
         \uIf{$\text{Relation}(m, u) \in \{\text{\small REQUIRES\_TEST}, \text{\small DIRECTLY\_INDICATES\_TEST}\}$}{
             $TestsForM \gets TestsForM \cup \{u\}$\;
@@ -533,7 +533,7 @@ $TestScores \gets \text{Empty Map}$ \tcp*{Tracks aggregate cosine score per test
             }
         }
     }
-    
+
     \ForEach{$test \in TestsForM$}{
         $TestScores[test] \gets TestScores.get(test, 0) + score$\;
     }
@@ -548,7 +548,7 @@ $P \gets \{test \mid TestScores[test] \ge \theta\}$\;
 \section{Computational Latency Benchmarks}
 \label{app:latency_benchmarks}
 
-To isolate the computational bottleneck within the GraphRAG semantic pipeline, our benchmarking separated the inference process into two phases: entity matching (embedding generation and vector search) and graph traversal (score aggregation and test imputation). 
+To isolate the computational bottleneck within the GraphRAG semantic pipeline, our benchmarking separated the inference process into two phases: entity matching (embedding generation and vector search) and graph traversal (score aggregation and test imputation).
 
 Table~\ref{tab:latency_benchmarks} demonstrates that the overwhelming majority of the latency in the semantic pipeline occurs during Phase 1, driven by the computational cost of the local biomedical embedding model. The subsequent graph traversal (Phase 2) adds only minimal overhead ($\sim$37 ms) compared to the initial vector search.
 
