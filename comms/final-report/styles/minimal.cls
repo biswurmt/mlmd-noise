@@ -94,7 +94,7 @@
     \noindent{\large\bfseries\@title}\par
     \vspace{4pt}%
     \noindent{\small%
-      Tyler Biswurm,\enspace Alice Chua}\par
+      Alice Chua,\enspace Tyler Biswurm}\par
     \vspace{1pt}%
     \noindent{\small\textit{%
       Department of Computer Science, University of Toronto
