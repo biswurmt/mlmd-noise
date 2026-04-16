@@ -640,20 +640,25 @@ def print_output_comparison(diagnoses: list[str], p1: dict, p2: dict | None) -> 
             print(f"    ⚑ substring/semantic returned DIFFERENT matched nodes for this dx")
 
 
+def _mean_std_str(times_s: list[float]) -> str:
+    """Return 'mean ± std ms' string for a list of second-valued timings."""
+    return f"{_mean(times_s) * 1000:.3f} ± {_std(times_s) * 1000:.3f} ms"
+
+
 def print_aggregate_summary(p1: dict, p2: dict | None, cold: dict) -> None:
     _hr("AGGREGATE SUMMARY")
     all_sub_p1 = [rec["sub_s"] for rec in p1["iter_records"]]
     all_sem_p1 = [rec["sem_s"] for rec in p1["iter_records"]]
     all_rgx_p1 = [rec["rgx_s"] for rec in p1["iter_records"]]
-    mean_sub   = _mean(all_sub_p1) * 1000
-    mean_sem   = _mean(all_sem_p1) * 1000
-    mean_rgx   = _mean(all_rgx_p1) * 1000
+    mean_sub = _mean(all_sub_p1) * 1000
+    mean_sem = _mean(all_sem_p1) * 1000
+    mean_rgx = _mean(all_rgx_p1) * 1000
 
     print(f"  Phase 1 — match-only  ({len(all_sub_p1)} iterations across pool):")
-    print(f"    Substring mean         : {mean_sub:.3f} ms")
-    print(f"    Semantic  mean         : {mean_sem:.3f} ms  "
+    print(f"    Substring mean ± std   : {_mean_std_str(all_sub_p1)}")
+    print(f"    Semantic  mean ± std   : {_mean_std_str(all_sem_p1)}  "
           f"({_speedup_str(mean_sub, mean_sem).strip()} vs substring)")
-    print(f"    Regex     mean         : {mean_rgx:.3f} ms  "
+    print(f"    Regex     mean ± std   : {_mean_std_str(all_rgx_p1)}  "
           f"({_speedup_str(mean_sub, mean_rgx).strip()} vs substring)\n")
 
     print(f"  Cold-start overhead:")
@@ -670,10 +675,10 @@ def print_aggregate_summary(p1: dict, p2: dict | None, cold: dict) -> None:
             mean_sem_p2 = _mean(all_sem_p2) * 1000
             mean_rgx_p2 = _mean(all_rgx_p2) * 1000
             print(f"\n  Phase 2 — full row  ({len(all_sub_p2)} iterations across pool):")
-            print(f"    Substring mean         : {mean_sub_p2:.3f} ms")
-            print(f"    Semantic  mean         : {mean_sem_p2:.3f} ms  "
+            print(f"    Substring mean ± std   : {_mean_std_str(all_sub_p2)}")
+            print(f"    Semantic  mean ± std   : {_mean_std_str(all_sem_p2)}  "
                   f"({_speedup_str(mean_sub_p2, mean_sem_p2).strip()} vs substring)")
-            print(f"    Regex     mean         : {mean_rgx_p2:.3f} ms  "
+            print(f"    Regex     mean ± std   : {_mean_std_str(all_rgx_p2)}  "
                   f"({_speedup_str(mean_sub_p2, mean_rgx_p2).strip()} vs substring)")
 
 
@@ -721,6 +726,64 @@ def export_csv(p1: dict, p2: dict | None, cold: dict, output_path: str) -> None:
     print(f"\n  Raw timings exported to: {output_path}")
 
 
+def export_matches_csv(
+    diagnoses: list[str],
+    p1: dict,
+    p2: dict | None,
+    output_path: str,
+) -> None:
+    """
+    Save matching results (last seen per dx) to a CSV.
+
+    Columns: dx, method,
+             phase1_matched_nodes, phase1_matched_tests,
+             phase2_matched_tests   (if Phase 2 was run)
+    """
+    last_matches = p1["last_matches"]
+    last_results = p2["last_results"] if p2 else {}
+
+    rows = []
+    for dx in diagnoses:
+        matches = last_matches.get(dx)
+        if matches is None:
+            continue
+
+        # Substring
+        sub_row: dict = {
+            "dx":     dx,
+            "method": "substring",
+            "phase1_matched_nodes": _fmt_matches(matches["sub"]),
+        }
+        if last_results.get(dx):
+            sub_row["phase2_matched_tests"] = last_results[dx]["sub"].get("potential_tests", "")
+        rows.append(sub_row)
+
+        # Semantic
+        sem_row: dict = {
+            "dx":     dx,
+            "method": "semantic",
+            "phase1_matched_nodes": _fmt_matches(matches["sem"]),
+        }
+        if last_results.get(dx):
+            sem_row["phase2_matched_tests"] = last_results[dx]["sem"].get("potential_tests", "")
+            sem_row["phase2_test_scores"]   = last_results[dx]["sem"].get("test_scores", "")
+        rows.append(sem_row)
+
+        # Regex
+        rgx_row: dict = {
+            "dx":     dx,
+            "method": "regex",
+            "phase1_matched_nodes": ", ".join(matches["rgx"]) if matches["rgx"] else "",
+        }
+        if last_results.get(dx):
+            rgx_row["phase2_matched_tests"] = last_results[dx]["rgx"].get("potential_tests", "")
+        rows.append(rgx_row)
+
+    df = pd.DataFrame(rows)
+    df.to_csv(output_path, index=False)
+    print(f"  Match results exported to: {output_path}")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -741,9 +804,13 @@ def main() -> None:
                              "Phase 2 uses N // 2 draws.")
     parser.add_argument("--no-full-row", action="store_true",
                         help="Skip Phase 2 (full single-row pipeline timing).")
+    _ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     parser.add_argument("--output-csv",
-                        default=f"benchmark_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        default=f"benchmark_results_{_ts}.csv",
                         help="Path for raw-timing CSV export.")
+    parser.add_argument("--output-matches",
+                        default=f"benchmark_matches_{_ts}.csv",
+                        help="Path for matched-results CSV export (default: benchmark_matches_<ts>.csv).")
     parser.add_argument("--top-k",    type=int,   default=_DEFAULT_TOP_K,    metavar="K",
                         help=f"Semantic ChromaDB top_k (default: {_DEFAULT_TOP_K}).")
     parser.add_argument("--min-score", type=float, default=_DEFAULT_MIN_SCORE, metavar="F",
@@ -826,6 +893,9 @@ def main() -> None:
 
     # ── Export raw timings CSV ────────────────────────────────────────────────
     export_csv(p1, p2, cold, args.output_csv)
+
+    # ── Export matching results CSV ───────────────────────────────────────────
+    export_matches_csv(diagnoses, p1, p2, args.output_matches)
 
     print("\nDone.\n")
 
