@@ -9,12 +9,9 @@ OUTPUT_CSV = 'patient_diagnoses_FINAL_PREDICTIONS.csv'
 
 # 1. Load the CSV with the matches_json column
 print(f"Loading CSV: {INPUT_CSV}...")
-df_orig = pd.read_csv(INPUT_CSV)
-
-# Ensure the 'dx' column is unique for prediction computation
-initial_len = len(df_orig)
-df = df_orig.drop_duplicates(subset=['dx'], keep='first').reset_index(drop=True)
-print(f"Dropped {initial_len - len(df)} duplicate diagnoses. Working with {len(df)} unique rows.")
+df = pd.read_csv(INPUT_CSV)
+df_orig = df  # kept for validation reference
+print(f"Loaded {len(df)} rows (all rows retained, no deduplication).")
 
 # ==========================================
 # 2. YOUR GOLDEN CONFIGURATION
@@ -83,9 +80,9 @@ df['xray_arm_kg'] = df['final_potential_tests'].apply(lambda x: 1 if 'Arm X-Ray'
 df['us_app_kg'] = df['final_potential_tests'].apply(lambda x: 1 if 'Appendix Ultrasound' in str(x) else 0)
 df['us_testes_kg'] = df['final_potential_tests'].apply(lambda x: 1 if 'Testicular Ultrasound' in str(x) else 0)
 
-# Save the finalized dataset
+# Save the finalized dataset (all rows)
 df.to_csv(OUTPUT_CSV, index=False)
-print(f"\nSuccess! Final dataset saved to {OUTPUT_CSV}")
+print(f"\nSuccess! Final dataset saved to {OUTPUT_CSV} ({len(df)} rows)")
 
 # ==========================================
 # 5. THE FINAL VALIDATION REPORT
@@ -96,11 +93,6 @@ test_mapping = {
     'us_app_dx': ('us_app_kg', 'Appendix Ultrasound'),
     'us_testes_dx': ('us_testes_kg', 'Testicular Ultrasound')
 }
-
-# Map predictions back to the original (with-duplicates) dataframe
-pred_cols = ['final_potential_tests', 'ecg_kg', 'xray_arm_kg', 'us_app_kg', 'us_testes_kg']
-dx_to_preds = df.set_index('dx')[pred_cols]
-df_val = df_orig.join(dx_to_preds, on='dx', rsuffix='_pred')
 
 def run_validation(val_df, label):
     print("\n" + "="*95)
@@ -138,12 +130,7 @@ def run_validation(val_df, label):
     print("-" * 95)
     return pd.DataFrame(rows)
 
-run_validation(df, "DEDUPLICATED").to_csv(
+run_validation(df, f"ALL ROWS ({len(df)} rows)").to_csv(
     OUTPUT_CSV.replace(".csv", "_validation.csv"), index=False
 )
-print(f"\nValidation report (deduplicated) saved to {OUTPUT_CSV.replace('.csv', '_validation.csv')}")
-
-run_validation(df_val, f"ORIGINAL ({len(df_val)} rows with duplicates)").to_csv(
-    OUTPUT_CSV.replace(".csv", "_validation_with_duplicates.csv"), index=False
-)
-print(f"Validation report (with duplicates) saved to {OUTPUT_CSV.replace('.csv', '_validation_with_duplicates.csv')}")
+print(f"\nValidation report saved to {OUTPUT_CSV.replace('.csv', '_validation.csv')}")
